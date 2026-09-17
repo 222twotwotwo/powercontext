@@ -36,6 +36,7 @@ type OperationTool<TParams extends TSchema> = {
   parameters: TParams
   operationId: OperationId
   payload: (params: Static<TParams>) => JsonObject
+  validate?: (params: Static<TParams>) => ToolResult | undefined
   mutates?: boolean
 }
 
@@ -183,6 +184,40 @@ const TASK_OUTCOME = Type.Object({
   produced_artifacts: Type.Array(ARTIFACT_REFERENCE, { maxItems: 32 }),
   remaining_work: Type.Array(NON_EMPTY_STRING, { maxItems: 64 }),
 })
+const GENERATION_FIELDS = {
+  target: Type.Optional(Type.Union([ARTIFACT_REFERENCE, Type.Null()])),
+  reason: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 2000 }), Type.Null()])),
+}
+const EXPERIENCE_GENERATION = Type.Object({
+  source_refs: Type.Array(SOURCE_REFERENCE, { maxItems: 32 }),
+  artifact_refs: Type.Array(ARTIFACT_REFERENCE, { maxItems: 32 }),
+  ...GENERATION_FIELDS,
+}, { additionalProperties: false })
+const SKILL_GENERATION = Type.Object({
+  origin: Type.Union([Type.Literal('experience'), Type.Literal('source'), Type.Literal('usage')]),
+  source_refs: Type.Array(SOURCE_REFERENCE, { maxItems: 32 }),
+  artifact_refs: Type.Array(ARTIFACT_REFERENCE, { maxItems: 32 }),
+  ...GENERATION_FIELDS,
+}, { additionalProperties: false })
+type GenerationParams = {
+  source_refs: Array<Static<typeof SOURCE_REFERENCE>>
+  artifact_refs: Array<Static<typeof ARTIFACT_REFERENCE>>
+  target?: Static<typeof ARTIFACT_REFERENCE> | null
+  reason?: string | null
+}
+type SkillGenerationParams = GenerationParams & {
+  origin: 'experience' | 'source' | 'usage'
+}
+
+function validateGenerationEvidence(params: GenerationParams): ToolResult | undefined {
+  if (params.source_refs.length + params.artifact_refs.length <= 32) return undefined
+  return {
+    ok: false,
+    code: 'invalid_request',
+    message: 'Generation accepts at most 32 combined source_refs and artifact_refs.',
+  }
+}
+
 const CANDIDATE_ID = Type.String({ minLength: 1, maxLength: 128, pattern: '^[\\x21-\\x7E]+$' })
 const EXPECTED_VERSION = Type.Integer({ minimum: 1 })
 const CANDIDATE_REASON = Type.String({ minLength: 1, maxLength: 2000, pattern: '.*\\S.*' })
@@ -267,6 +302,8 @@ function registerOperationTool<TParams extends TSchema>(
     description: definition.description,
     parameters: definition.parameters,
     async execute(_toolCallId, params, signal, _onUpdate, context) {
+      const invalid = definition.validate?.(params)
+      if (invalid) return render(invalid)
       return render(await invoke(
         runtime,
         context,
@@ -596,6 +633,53 @@ export function registerTools(pi: ExtensionAPI, runtime: PluginRuntime): void {
       prepared: params.prepared,
       revision: params.revision,
     }),
+  })
+
+  registerOperationTool(pi, runtime, {
+    name: 'pc_experience_generate',
+    label: 'PowerContext Experience Generate',
+    description:
+      'Generate an Experience candidate from exact Source and Artifact evidence when the user requests ' +
+      'candidate generation. The result remains pending human review; generation does not approve, ' +
+      'publish, install, or activate it. Preserve exact returned references and report the returned ' +
+      'status. Do not use this as a routine Memory write.',
+    parameters: EXPERIENCE_GENERATION,
+    operationId: 'generate_experience',
+    payload: (params) => {
+      const value = params as GenerationParams
+      return {
+        source_refs: value.source_refs,
+        artifact_refs: value.artifact_refs,
+        target: value.target,
+        reason: value.reason,
+      }
+    },
+    validate: validateGenerationEvidence,
+    mutates: true,
+  })
+
+  registerOperationTool(pi, runtime, {
+    name: 'pc_skill_generate',
+    label: 'PowerContext Skill Generate',
+    description:
+      'Generate a Skill candidate from exact evidence when the user requests candidate generation. ' +
+      'The result remains pending human review; generation does not approve, publish, install, or ' +
+      'activate the Skill. Preserve exact returned references and report the returned status. Review ' +
+      'decisions remain outside the Pi tool surface.',
+    parameters: SKILL_GENERATION,
+    operationId: 'generate_skill',
+    payload: (params) => {
+      const value = params as SkillGenerationParams
+      return {
+        origin: value.origin,
+        source_refs: value.source_refs,
+        artifact_refs: value.artifact_refs,
+        target: value.target,
+        reason: value.reason,
+      }
+    },
+    validate: validateGenerationEvidence,
+    mutates: true,
   })
 
   registerOperationTool(pi, runtime, {

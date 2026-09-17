@@ -16,10 +16,20 @@ Read only the relevant reference when its workflow detail is needed; self-contai
 | Save, correct, retire / 记住、纠正、停用记忆 | `pc_remember` for explicit save; [Scope and Memory](references/scope-memory.md). |
 | Transfer or resume work / 交接、接续工作 | `pc_handoff_current`; [Work Handoff](references/work-handoff.md). Ordinary transfer is temporary; durable commit needs explicit intent. |
 | Inspect candidates / 审查候选 | `pc_review_list`; [Review and publication](references/review-publication.md). Inspection grants no decision authority. |
+| Generate candidates / 生成候选 | `pc_experience_generate` or `pc_skill_generate` only for an explicit request with exact relevant evidence; generated output remains pending review. |
 | Approve, reject or revise a candidate / 批准、拒绝或修订候选 | `pc_review_approve`, `pc_review_reject`, `pc_review_revise`; [Candidate review workflow](references/review-publication.md). Requires explicit authorization for the exact candidate and current version. |
 | Discover or import external Skills / 发现或导入外部技能 | `pc_external_scan`, `pc_external_list`, `pc_external_resolve`, `pc_external_import`; [External Skill workflow](references/review-publication.md). Import or fork requires explicit authorization for the exact resolved Skill. |
 
 The integration owns Scope selection; preserve its resolved Scope in ordinary operations.
+
+## Generate candidates
+
+Call `pc_experience_generate` only when the user explicitly requests an Experience candidate and exact relevant
+Source or Artifact references are available. Call `pc_skill_generate` only for an explicit Skill candidate request
+with exact evidence, and set `origin` to `experience`, `source`, or `usage` according to the direct provenance.
+Pass `source_refs` and `artifact_refs` exactly as returned; `target` and `reason` are optional. Generation creates a
+pending review candidate, not a saved fact or active behavior, and does not approve, publish, install, activate, or
+execute the result. Candidate decisions remain a human review action.
 
 ## Boundaries and results
 
