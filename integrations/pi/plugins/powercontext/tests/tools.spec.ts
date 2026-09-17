@@ -15,6 +15,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
+import { validateToolArguments, type Tool, type ToolCall } from '@earendil-works/pi-ai'
 import type { TSchema } from 'typebox'
 import { Value } from 'typebox/value'
 import powercontextPi from '../extensions/powercontext.ts'
@@ -77,6 +78,8 @@ describe('Pi native tool surface', () => {
       'pc_remember',
       'pc_memory_list',
       'pc_memory_get',
+      'pc_memory_changes',
+      'pc_stats',
       'pc_memory_revise',
       'pc_memory_retire',
       'pc_prepare_context',
@@ -146,6 +149,61 @@ describe('Pi native tool surface', () => {
       text: 'keep API async',
       scope_id: 'project:demo',
     })
+  })
+
+  it('routes Memory Changes and Stats as read-only current-Scope operations', async () => {
+    const registered: Array<Record<string, unknown>> = []
+    const fetch = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ ok: true })))
+    const runtime = createRuntime(fetch)
+    registerTools({ registerTool: (tool: Record<string, unknown>) => registered.push(tool) } as never, runtime)
+    const confirm = vi.fn(async () => true)
+    const context = { cwd: '/workspace/repo', hasUI: false, ui: { confirm } }
+    const signal = new AbortController().signal
+
+    await registeredTool<{ since_revision: number }>(registered, 'pc_memory_changes').execute(
+      'call-changes', { since_revision: 7 }, signal, () => undefined, context,
+    )
+    await registeredTool<{ period: string }>(registered, 'pc_stats').execute(
+      'call-stats', { period: '7d' }, signal, () => undefined, context,
+    )
+
+    expect(confirm).not.toHaveBeenCalled()
+    expect(fetch.mock.calls.map(([url, init]) => [url, JSON.parse(String(init?.body))])).toEqual([
+      ['http://127.0.0.1:8000/v1/memory/changes', { since_revision: 7, scope_id: 'project:demo' }],
+      ['http://127.0.0.1:8000/v1/stats', { period: '7d', selection: { mode: 'exact', scope_ids: ['project:demo'] } }],
+    ])
+  })
+
+  it('keeps the read-only tool schemas within the API contract', () => {
+    const registered: Array<Record<string, unknown>> = []
+    registerTools({ registerTool: (tool: Record<string, unknown>) => registered.push(tool) } as never, createRuntime(vi.fn()))
+    const changes = registeredTool<Record<string, unknown>>(registered, 'pc_memory_changes') as unknown as { parameters: TSchema }
+    const stats = registeredTool<Record<string, unknown>>(registered, 'pc_stats') as unknown as { parameters: TSchema }
+
+    expect(Value.Check(changes.parameters, {})).toBe(true)
+    expect(Value.Check(changes.parameters, { since_revision: 0 })).toBe(true)
+    expect(Value.Check(changes.parameters, { since_revision: null })).toBe(true)
+    expect(Value.Check(changes.parameters, { since_revision: -1 })).toBe(false)
+    expect(Value.Check(changes.parameters, { since_revision: 1.5 })).toBe(false)
+    expect(Value.Check(changes.parameters, { extra: true })).toBe(false)
+    expect(Value.Check(stats.parameters, {})).toBe(true)
+    expect(Value.Check(stats.parameters, { period: 'today' })).toBe(true)
+    expect(Value.Check(stats.parameters, { period: '7d' })).toBe(true)
+    expect(Value.Check(stats.parameters, { period: '90d' })).toBe(false)
+    expect(Value.Check(stats.parameters, { period: '30d', extra: true })).toBe(false)
+  })
+
+  it('preserves nullable revision cursors through Pi argument validation', () => {
+    const registered: Array<Record<string, unknown>> = []
+    registerTools({ registerTool: (tool: Record<string, unknown>) => registered.push(tool) } as never, createRuntime(vi.fn()))
+    const tool = registeredTool<Record<string, unknown>>(registered, 'pc_memory_changes') as unknown as Tool
+    const call = (since_revision: unknown): ToolCall => ({
+      type: 'toolCall', id: 'call-validation', name: 'pc_memory_changes', arguments: { since_revision },
+    })
+
+    expect(validateToolArguments(tool, call(null))).toEqual({ since_revision: null })
+    expect(validateToolArguments(tool, call(0))).toEqual({ since_revision: 0 })
+    expect(() => validateToolArguments(tool, call(1.5))).toThrow('Validation failed')
   })
 
   it('requires confirmation and filters secrets for all structured work writes', async () => {
