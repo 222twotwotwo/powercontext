@@ -4690,9 +4690,13 @@ def _path_artifact_tags_write_access(
     payload: Mapping[str, Any],
     _deployment_id: str,
 ) -> tuple[tuple[AccessAction, ResourceRef], ...]:
-    if _path_artifact_family(payload) in {BaseArtifactFamily.MEMORY.value, "topic-memory"}:
-        # The Memory container has no single entry owner; its shared metadata
-        # belongs to the Scope administrator.
+    if _path_artifact_family(payload) in {
+        BaseArtifactFamily.MEMORY.value,
+        BaseArtifactFamily.PROMPT.value,
+        "topic-memory",
+    }:
+        # Scope-owned knowledge and configuration metadata require current
+        # Scope administration, even if an Artifact owner binding remains.
         return _path_scope_access(payload, action=AccessAction.SCOPE_ADMIN)
     return _path_artifact_access(payload, action=AccessAction.ARTIFACT_WRITE)
 

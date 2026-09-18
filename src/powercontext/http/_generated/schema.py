@@ -8370,8 +8370,8 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
             },
             "TaggableArtifactFamily": {
                 "type": "string",
-                "enum": ["memory", "experience", "skill", "handoff", "topic-memory"],
-                "description": "Artifact families supporting logical tags; Prompt configurations are excluded.",
+                "enum": ["memory", "experience", "skill", "handoff", "profile", "prompt", "topic-memory"],
+                "description": "All readable Artifact families support logical tags on persisted Artifacts.",
             },
             "TagMatch": {"type": "string", "enum": ["all", "any"]},
             "TagTargetType": {"type": "string", "enum": ["artifact", "memory_entry"]},
@@ -8459,9 +8459,10 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                     "families": {
                         "items": {"$ref": "#/components/schemas/TaggableArtifactFamily"},
                         "type": "array",
-                        "maxItems": 5,
+                        "maxItems": 7,
                         "minItems": 1,
                         "uniqueItems": True,
+                        "description": "Restrict matching families. Omit to query all supported Artifact families.",
                     },
                     "target_types": {
                         "items": {"$ref": "#/components/schemas/TagTargetType"},
