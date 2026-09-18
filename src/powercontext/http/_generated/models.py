@@ -1616,6 +1616,8 @@ class TaggableArtifactFamily(StrEnum):
     EXPERIENCE = "experience"
     SKILL = "skill"
     HANDOFF = "handoff"
+    PROFILE = "profile"
+    PROMPT = "prompt"
     TOPIC_MEMORY = "topic-memory"
 
 
@@ -1689,7 +1691,14 @@ class QueryArtifactTagsRequest(BaseModel):
     )
     tags: Annotated[list[Tag], Field(max_length=16, min_length=1)]
     match: TagMatch = TagMatch.ALL
-    families: Annotated[list[TaggableArtifactFamily] | None, Field(max_length=5, min_length=1)] = None
+    families: Annotated[
+        list[TaggableArtifactFamily] | None,
+        Field(
+            description="Restrict matching families. Omit to query all supported Artifact families.",
+            max_length=7,
+            min_length=1,
+        ),
+    ] = None
     target_types: Annotated[list[TagTargetType] | None, Field(max_length=2, min_length=1)] = None
     include_inactive: StrictBool = False
     limit: Annotated[StrictInt, Field(ge=1, le=100)] = 50

@@ -770,11 +770,21 @@ def test_prompt_management_respects_scope_and_artifact_permissions(tmp_path: Pat
             assert configuration.status_code == 200
             assert configuration.json()["artifact"]["revision"] == 1
             assert (await client.get(configuration_path, headers=outsider)).status_code == 403
-            for suffix in ("", "/revisions/1", "/revisions"):
+            for suffix in ("", "/revisions/1", "/revisions", "/tags"):
                 allowed = await client.get(path + suffix, headers=reader)
                 assert allowed.status_code == 200, allowed.text
                 denied = await client.get(path + suffix, headers=outsider)
                 assert denied.status_code == 403, denied.text
+            tags = await client.get(path + "/tags", headers=reader)
+            for headers in (contributor, reader, outsider):
+                denied = await client.put(
+                    path + "/tags", headers=headers | {"If-Match": tags.headers["ETag"]}, json={"tags": ["release"]}
+                )
+                assert denied.status_code == 403, denied.text
+            tagged = await client.put(
+                path + "/tags", headers=author | {"If-Match": tags.headers["ETag"]}, json={"tags": ["release"]}
+            )
+            assert tagged.status_code == 200, tagged.text
             for headers in (contributor, reader, outsider):
                 denied = await client.put(
                     path, headers={**headers, "If-Match": '"revision:1"'}, json={"content": content}
@@ -823,6 +833,8 @@ def test_prompt_owner_cannot_mutate_after_scope_role_revocation(
                 [administrator, contributor] if revoked_role == "scope.contributor" else [contributor, administrator]
             )
             path = f"/v1/scopes/{scope}/artifacts/prompt/memory.extract"
+            tags = await client.get(path + "/tags", headers=author)
+            assert tags.status_code == 200, tags.text
             for binding in bindings:
                 revoked = await client.post(
                     "/v1/access/bindings/revoke",
@@ -833,6 +845,13 @@ def test_prompt_owner_cannot_mutate_after_scope_role_revocation(
                     },
                 )
                 assert revoked.status_code == 200, revoked.text
+                if binding == administrator:
+                    denied = await client.put(
+                        path + "/tags",
+                        headers=author | {"If-Match": tags.headers["ETag"]},
+                        json={"tags": ["unauthorized"]},
+                    )
+                    assert denied.status_code == 403, denied.text
                 if binding == administrator and revoked_role == "scope.contributor":
                     denied = await client.put(
                         path, headers={**author, "If-Match": '"revision:1"'}, json={"content": content}
@@ -860,6 +879,12 @@ def test_prompt_owner_cannot_mutate_after_scope_role_revocation(
             assert configuration.json()["effective"]["instructions"] == content["instructions"]
             # Scope administration remains sufficient even when a revoked user owns the Artifact.
             await _grant(client, scope, "manager", "scope.admin")
+            tagged = await client.put(
+                path + "/tags",
+                headers={"Authorization": "Bearer manager", "If-Match": tags.headers["ETag"]},
+                json={"tags": ["release"]},
+            )
+            assert tagged.status_code == 200, tagged.text
             replaced = await client.put(
                 path,
                 headers={"Authorization": "Bearer manager", "If-Match": '"revision:1"'},
