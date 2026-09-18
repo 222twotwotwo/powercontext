@@ -110,7 +110,12 @@ from powercontext.builtin.persistence.topic_memory_index import (
     TopicMemoryIndex,
 )
 from powercontext.builtin.runtime._scope_cache import ScopeCacheObserver
-from powercontext.builtin.runtime.application import BuiltinRuntime, ScheduledExperienceRunner, ScheduledSourceRunner
+from powercontext.builtin.runtime.application import (
+    BuiltinRuntime,
+    RecallEffortSink,
+    ScheduledExperienceRunner,
+    ScheduledSourceRunner,
+)
 from powercontext.builtin.runtime.artifact_processing import (
     ArtifactProcessingBinding,
     ArtifactProcessingSupervisor,
@@ -134,6 +139,7 @@ from powercontext.builtin.runtime.readiness import (
     RuntimeReadinessChecks,
     dependency_readiness_probe,
 )
+from powercontext.builtin.runtime.recall_sufficiency import RecallSufficiencyPolicy
 from powercontext.builtin.runtime.relational import RelationalContexts
 from powercontext.builtin.runtime.topic_memory_processing import (
     TopicMemoryWorkerSpec,
@@ -282,6 +288,7 @@ async def open_builtin_runtime(
     source_registry: SourceDefinitionRegistry | None = None,
     cursor_secret: bytes | None = None,
     handoff_verification_keys: tuple[bytes, ...] = (),
+    recall_effort_sink: RecallEffortSink | None = None,
 ) -> AsyncIterator[BuiltinRuntime]:
     """Open the selected database, inference adapters, and built-in runtime."""
 
@@ -472,6 +479,7 @@ async def open_builtin_runtime(
                 ),
                 source_window_limit=config.runtime.source_window_limit,
                 context_assembly_max_entries=config.runtime.context_assembly_max_entries,
+                recall_sufficiency_policy=RecallSufficiencyPolicy.from_runtime_config(config.runtime),
                 scope_cache_size=config.runtime.scope_cache_size,
                 scope_evictor=contexts.evict,
                 scope_cache_observer=scope_cache_observer,
@@ -490,7 +498,7 @@ async def open_builtin_runtime(
                     attest_candidate=dream_candidate_attester,
                 ),
                 generation_concurrency=config.runtime.generation_concurrency,
-                experience_recall=contexts.search_experience,
+                experience_recall=contexts.search_experience_outcome,
                 skill_recall=contexts.search_skills,
                 skill_lister=contexts.list_skills,
                 skill_origin_reader=contexts.get_skill_origins,
@@ -516,6 +524,7 @@ async def open_builtin_runtime(
                 record_service=contexts.records,
                 prompt_service=contexts.prompts,
                 recall_token_estimator=contexts.estimate_recall_tokens,
+                recall_effort_sink=recall_effort_sink,
                 publication_application=contexts.publications,
                 scope_application=contexts.scopes,
                 readiness=RuntimeReadinessChecks(readiness_probes),

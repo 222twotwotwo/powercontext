@@ -21,8 +21,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from powercontext.artifacts import ArtifactRef
-from powercontext.builtin.artifacts.experience import Experience, ExperienceContent, ExperienceSearchHit
-from powercontext.builtin.artifacts.experience.models import (
+from powercontext.builtin.artifacts.experience import (
+    Experience,
+    ExperienceContent,
+    ExperienceSearchOutcome,
     FailureRecord,
     FailureSignature,
     FailureVerification,
@@ -99,8 +101,10 @@ class _FailingExperienceIndex:
         _query: str,
         _limit: int,
         /,
-    ) -> tuple[ExperienceSearchHit, ...]:
-        return ()
+        *,
+        admission: object = None,
+    ) -> ExperienceSearchOutcome:
+        return ExperienceSearchOutcome()
 
     async def replace_skill(
         self,
