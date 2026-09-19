@@ -1257,6 +1257,17 @@ def _canonical_source_content(source_type: str, materialized: object) -> str:
         if not materialized.strip():
             raise TopicMemoryGenerationError("unsupported_evidence")
         return materialized
+    payload = _source_evidence_payload(source_type, materialized)
+    _require_bounded_source_payload(payload)
+    content = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    if len(content) > MAX_TOPIC_MEMORY_SOURCE_CHARACTERS:
+        raise TopicMemoryGenerationError("source_complexity_limit")
+    if not content.strip():
+        raise TopicMemoryGenerationError("unsupported_evidence")
+    return content
+
+
+def _source_evidence_payload(source_type: str, materialized: object) -> dict[str, object]:
     if source_type == CONTENT_SOURCE_NAME and isinstance(materialized, ContentCapture):
         payload = {
             "content": materialized.content,
@@ -1285,13 +1296,7 @@ def _canonical_source_content(source_type: str, materialized: object) -> str:
         payload = _observation_evidence_payload(materialized)
     else:
         raise TopicMemoryGenerationError("unsupported_evidence")
-    _require_bounded_source_payload(payload)
-    content = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    if len(content) > MAX_TOPIC_MEMORY_SOURCE_CHARACTERS:
-        raise TopicMemoryGenerationError("source_complexity_limit")
-    if not content.strip():
-        raise TopicMemoryGenerationError("unsupported_evidence")
-    return content
+    return payload
 
 
 def _observation_evidence_payload(source: SourceObservation) -> dict[str, object]:
