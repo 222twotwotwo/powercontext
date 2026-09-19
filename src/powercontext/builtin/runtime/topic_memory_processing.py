@@ -1268,6 +1268,7 @@ def _canonical_source_content(source_type: str, materialized: object) -> str:
 
 
 def _source_evidence_payload(source_type: str, materialized: object) -> dict[str, object]:
+    payload: dict[str, object]
     if source_type == CONTENT_SOURCE_NAME and isinstance(materialized, ContentCapture):
         payload = {
             "content": materialized.content,
