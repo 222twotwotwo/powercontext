@@ -211,15 +211,17 @@ def test_profile_http_policy_crud_review_and_rollback(tmp_path, enforced):
                 "/v1/source-definitions/register", json={"manifest": manifest.model_dump(mode="json", by_alias=True)}
             )
             assert registered.status_code == 200, registered.text
-            observation = project_source_for_transport(
-                registry,
-                NoteSource(name="preferences", materialization=SourceMaterialization.CAPTURED, body="Chinese please"),
-            )
-            submitted = await client.post(
-                "/v1/source-observations",
-                json={"scope_id": sid, "observation": observation.model_dump(mode="json", by_alias=True)},
-            )
-            assert submitted.status_code == 202, submitted.text
+            remote_ids = ("preferences", "用户偏好", "release notes")
+            for source_id in remote_ids:
+                observation = project_source_for_transport(
+                    registry,
+                    NoteSource(name=source_id, materialization=SourceMaterialization.CAPTURED, body="Chinese please"),
+                )
+                submitted = await client.post(
+                    "/v1/source-observations",
+                    json={"scope_id": sid, "observation": observation.model_dump(mode="json", by_alias=True)},
+                )
+                assert submitted.status_code == 202, submitted.text
             await client.post(path + "/sources", json={"content": "Chinese please"})
             pending = await client.post("/v1/profile/flush", json={"scope_id": sid})
             assert pending.status_code == 200, pending.text
@@ -229,6 +231,9 @@ def test_profile_http_policy_crud_review_and_rollback(tmp_path, enforced):
                 "/v1/artifact-candidates/get", json={"scope_id": sid, "candidate_id": candidate_id}
             )
             assert {ref["name"] for ref in candidate.json()["source_refs"]} == {"note", "content"}
+            assert {ref["source_id"] for ref in candidate.json()["source_refs"] if ref["name"] == "note"} == set(
+                remote_ids
+            )
             approved = await client.post(
                 "/v1/artifact-candidates/approve",
                 json={
@@ -248,6 +253,9 @@ def test_profile_http_policy_crud_review_and_rollback(tmp_path, enforced):
             listing = await client.get(path + "/artifacts/profile")
             assert listing.status_code == 200, listing.text
             assert listing.json()["items"][0]["sources"] == expected_sources
+            revision = await client.get(artifact_path + "/revisions/1")
+            assert revision.status_code == 200, revision.text
+            assert revision.json()["sources"] == expected_sources
             assert first.json()["content"]["generation"]["mode"] == "review_approved"
             if enforced:
                 resource = {

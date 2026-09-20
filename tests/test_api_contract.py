@@ -916,7 +916,9 @@ def test_base_access_uses_a_dedicated_source_type_reference() -> None:
     ):
         assert "sources" not in schemas[request_name]["properties"]
     for source_type in ("content", "note"):
-        assert SourceTypeReference(source_type=source_type, source_id="source").source_type == source_type
+        for source_id in ("source", "用户偏好", "release notes"):
+            reference = SourceTypeReference(source_type=source_type, source_id=source_id)
+            assert reference.model_dump() == {"source_type": source_type, "source_id": source_id}
 
 
 def test_base_access_operations_describe_create_and_conditional_get() -> None:

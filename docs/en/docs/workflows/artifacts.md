@@ -39,6 +39,7 @@ The current head can advance while a historical Revision remains unchanged.
 
 Artifact `sources` preserve each source's `source_type` and `source_id`, including dynamically registered types such
 as `note`. Treat `source_type` as an open Source name when reading lists, details, and historical revisions.
+Source IDs retain accepted Unicode characters and interior spaces, such as `用户偏好` and `release notes`.
 The Python Client exposes this field as a string; use it directly instead of accessing an enum's `.value`.
 
 See the [complete HTTP API reference](/api/) for request fields, response models, and interactive operation examples.

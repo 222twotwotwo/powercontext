@@ -1966,7 +1966,14 @@ class SourceTypeReference(BaseModel):
     source_type: Annotated[
         StrictStr, Field(description="Stable Source type, including dynamically registered Source names.")
     ]
-    source_id: Annotated[StrictStr, Field(max_length=256, min_length=1, pattern="^[\\x21-\\x7E]+$")]
+    source_id: Annotated[
+        StrictStr,
+        Field(
+            description="Source identity as accepted at ingestion, including Unicode and interior spaces.",
+            max_length=256,
+            min_length=1,
+        ),
+    ]
 
 
 class SourceReference(BaseModel):
