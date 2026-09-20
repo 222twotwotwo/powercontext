@@ -88,6 +88,7 @@ from powercontext.builtin.inference import (
     StructuredGenerator,
     TokenEstimator,
     character_token_estimator,
+    embed_query,
 )
 from powercontext.builtin.inference.usage import bind_usage_reporter
 from powercontext.builtin.persistence.cursors import SourceCursorRepository
@@ -573,6 +574,15 @@ class TopicMemoryProcessor:
         )
         return await self._embedding_model.embed(texts)
 
+    async def _embed_query(self, texts: tuple[str, ...]):
+        if self._embedding_model is None:
+            raise TopicMemoryGenerationError("embedding_unavailable")
+        # At most one provider request per text (the adapter may batch them).
+        await self._reserve(
+            requests=max(1, len(texts)), tokens=max(1, sum(self._stages.estimator.estimate(text) for text in texts))
+        )
+        return await embed_query(self._embedding_model, texts)
+
     async def _read_window(self, assignment: TopicMemoryWindowAssignment) -> tuple[StoredSource, ...]:
         if assignment.source_through - assignment.source_after > MAX_TOPIC_MEMORY_WINDOW_SOURCES:
             raise TopicMemoryGenerationError("source_complexity_limit")
@@ -837,7 +847,7 @@ class TopicMemoryProcessor:
         profile = None
         if self._embedding_model is not None:
             with self._usage(ModelUsagePurpose.TOPIC_MEMORY_RECALL, embedding=True):
-                embedded = await self._embed((query if semantic_query is None else semantic_query,))
+                embedded = await self._embed_query((query if semantic_query is None else semantic_query,))
             query_vector = embedded.vectors[0]
             profile = self._embedding_model.profile
         async with self._database.transaction() as connection:
@@ -1496,12 +1506,18 @@ def validate_topic_memory_provider_settings(inference: InferenceConfig) -> None:
         "deepseek",
         "openrouter",
     }
-    for name, settings, allowed in (
-        (inference.generation_model, inference.generation_model_settings, generation),
-        (inference.embedding_model, inference.embedding_model_settings, {"dimensions", "truncate"}),
+    embedding_providers = providers | {"minimax"}
+    for name, settings, allowed, provider_names in (
+        (inference.generation_model, inference.generation_model_settings, generation, providers),
+        (
+            inference.embedding_model,
+            inference.embedding_model_settings,
+            {"dimensions", "truncate"},
+            embedding_providers,
+        ),
     ):
         # The built-in test model has no external I/O; retain hermetic workers.
-        if name is not None and name != "test" and name.split(":", 1)[0] not in providers:
+        if name is not None and name != "test" and name.split(":", 1)[0] not in provider_names:
             raise BuiltinConfigurationError("topic-memory-provider-budget")
         if set(settings) - allowed or any(
             value is not None

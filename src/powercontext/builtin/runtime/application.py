@@ -122,8 +122,10 @@ from powercontext.builtin.dream.service import CandidateAttester, DreamAuthorize
 from powercontext.builtin.evidence.resolver import AuthorizationContext, ScopedEvidenceAuthorizer
 from powercontext.builtin.inference import (
     EmbeddingModel,
+    InferenceTimeoutError,
     InferenceUnavailableError,
     InvalidInferenceOutputError,
+    embed_query,
 )
 from powercontext.builtin.inference.models import InferenceUsage
 from powercontext.builtin.inference.usage import bind_usage_reporter
@@ -2626,10 +2628,10 @@ class ScopedTopicMemoryApplication:
             return result.model_copy(update={"query_embedding": query_embedding, "embedding_calls": 0}), False
         try:
             async with asyncio.timeout(embedding_timeout_seconds):
-                embedded = await embedding.embed((request.query,))
+                embedded = await embed_query(embedding, (request.query,))
             if len(embedded.vectors) != 1:
                 raise InvalidInferenceOutputError("embed", "provider returned the wrong vector count")
-        except (InferenceUnavailableError, TimeoutError) as error:
+        except (InferenceUnavailableError, InferenceTimeoutError, TimeoutError) as error:
             used_fallback = True
             log_safely(
                 logger,
@@ -2639,7 +2641,11 @@ class ScopedTopicMemoryApplication:
                     "event": "topic_memory.search.embedding_fallback",
                     "outcome": "fallback",
                     "mode": "fts",
-                    "error_code": ("inference_timeout" if isinstance(error, TimeoutError) else "inference_unavailable"),
+                    "error_code": (
+                        "inference_timeout"
+                        if isinstance(error, (InferenceTimeoutError, TimeoutError))
+                        else "inference_unavailable"
+                    ),
                     "unit": "topic-memory",
                 },
             )
