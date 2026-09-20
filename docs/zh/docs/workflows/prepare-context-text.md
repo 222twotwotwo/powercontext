@@ -89,7 +89,8 @@ asyncio.run(export_context())
 显式 `assembly` 通过选择 `topic-memory` 包含主题记忆；`assembly: {}` 仍只选择 Memory 和 Experience。
 
 当前 Scope 没有 Topic 时，主题召回会跳过查询 Embedding。组装上下文时，每次 Topic 查询 Embedding 最多等待
-250 毫秒，超时后回退到 FTS，避免缓慢的可选模型阻塞已召回的 Memory。直接检索 Topic 仍使用配置的模型超时。
+250 毫秒，超时后回退到 FTS。同一次 prepare 的 recall gate 扩展轮次复用这个选择，后续请求可以重新尝试 Embedding，
+避免缓慢的可选模型重复阻塞已召回的 Memory。直接检索 Topic 仍使用配置的模型超时。
 
 同一类别内保留召回顺序，包括已有 Memory reranker 的排序。前面的候选因预算无法装入时，rank 可能不连续。
 被排除的类别不会参与召回。重复类别、非法 limit、`sort_by` 或 `min_confidence` 等不支持的字段，以及显式

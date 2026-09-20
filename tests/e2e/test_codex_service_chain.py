@@ -36,7 +36,7 @@ from pydantic_ai.models.test import TestModel
 from powercontext.builtin.artifacts.memory import EmbeddingProfile
 from powercontext.builtin.inference import EmbeddingResult, InferenceUnavailableError
 from powercontext.builtin.persistence.sqlite import SQLiteConfig
-from powercontext.builtin.runtime import InferenceConfig
+from powercontext.builtin.runtime import InferenceConfig, RuntimeConfig
 from powercontext.client import PowerContextClient
 from powercontext.http import (
     ListMemoryEntriesRequest,
@@ -54,7 +54,10 @@ AUTHORIZATION = f"Bearer {AUTH_TOKEN}"
 
 
 @pytest.mark.parametrize("with_topic", [False, True], ids=["empty-topics", "existing-topic"])
-def test_codex_hook_injects_fts_memory_while_optional_embedding_is_stalled(tmp_path: Path, with_topic: bool) -> None:
+@pytest.mark.parametrize("recall_gate_enabled", [False, True], ids=["default", "gate-enabled"])
+def test_codex_hook_injects_fts_memory_while_optional_embedding_is_stalled(
+    tmp_path: Path, with_topic: bool, recall_gate_enabled: bool
+) -> None:
     class StalledEmbedding:
         profile = EmbeddingProfile(profile_id="stalled", model="stalled", dimension=2)
         stalled = False
@@ -73,6 +76,7 @@ def test_codex_hook_injects_fts_memory_while_optional_embedding_is_stalled(tmp_p
             database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'stalled.db'}"),
             auth=BearerAuthConfig(token=SecretStr(AUTH_TOKEN)),
             access=AccessControlConfig(mode="enforced"),
+            runtime=RuntimeConfig(recall_gate_enabled=recall_gate_enabled),
         ),
         embedding_model=embedding,
     )

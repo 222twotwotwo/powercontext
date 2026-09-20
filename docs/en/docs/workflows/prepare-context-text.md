@@ -89,7 +89,8 @@ Default prepare requests without `assembly` also recall Topic Memory from the cu
 With explicit `assembly`, select `topic-memory` to include it. `assembly: {}` still selects only Memory and Experience.
 
 Topic recall skips query Embedding when the Scope has no current Topics. During context preparation, each Topic
-query Embedding attempt has a 250 ms budget and falls back to FTS on timeout, so a slow optional provider does not
+query Embedding attempt has a 250 ms budget and falls back to FTS on timeout. The same prepare request reuses that FTS
+choice in recall-gate expansion rounds; a subsequent request can try Embedding again. A slow optional provider does not
 hold up already retrieved Memory. Direct Topic search keeps the configured provider timeout.
 
 Entries retain retrieval order within a family. Existing Memory reranking remains authoritative. Rank can have gaps
