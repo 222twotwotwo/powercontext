@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "review": "Answers are reviewed without arm names or tool traces. Automated review is not an independent human audit.",
+  "criteria": {
+    "understand-prepared-defaults": [
+      "Traces HTTP input through Runtime recall to the pure PreparedContext renderer with valid citations.",
+      "Distinguishes omitted assembly from an explicit empty object, including Topic Memory and the six-Memory/two-Experience defaults.",
+      "Explains that an explicitly empty sections list produces empty context at this historical baseline.",
+      "Explains byte and entry budget enforcement using cited implementation evidence."
+    ],
+    "understand-source-processing": [
+      "Traces Source observation admission and durable storage with citations.",
+      "Distinguishes accepted input from completed artifact processing.",
+      "Identifies the actual scheduling or supervisor path and selection of processing work.",
+      "Identifies durable progress/outcome or retry boundaries without claiming guaranteed immediate extraction."
+    ],
+    "understand-scope-authorization": [
+      "Identifies the actual Scope access decision path and principal/resource boundary.",
+      "Explains snapshot or shared authorization decisions from implementation evidence.",
+      "Traces reference expansion into prepared-context candidate retrieval.",
+      "Explains exclusion of unreadable referenced Scopes without inventing cross-Scope access guarantees."
+    ],
+    "understand-memory-publication": [
+      "Traces the Python Client request and HTTP handler into the Memory runtime service.",
+      "Explains durable publication or commit boundaries with valid citations.",
+      "Identifies text/vector index update behavior without equating a model call with a durable commit.",
+      "Distinguishes provenance and builtin service interfaces from backend implementation."
+    ],
+    "impact-cursor-signing": [
+      "Identifies actual callers of cursor-secret resolution and signing consumers.",
+      "Connects the change to real public pagination paths with source evidence.",
+      "Names relevant regression tests with evidence; returns no more than 20 affected files/tests.",
+      "Separates proven static dependencies from possible downstream runtime consequences."
+    ],
+    "impact-http-transport": [
+      "Identifies central insecure-HTTP validation and consent behavior.",
+      "Distinguishes shared Client behavior from copied or independently implemented plugin validation.",
+      "Names relevant transport/configuration tests with evidence; returns no more than 20 files/tests.",
+      "Avoids claiming all host integrations share one implementation merely because names match."
+    ],
+    "impact-scope-expansion": [
+      "Identifies the implementation of cycle/depth handling and actual callers.",
+      "Traces affected Runtime retrieval operations with citations.",
+      "Names relevant Scope expansion and consumer tests; returns no more than 20 files/tests.",
+      "States unknown or negative cases and avoids unsupported impact inferred solely from symbol names."
+    ],
+    "impact-profile-resolution": [
+      "Identifies effective Profile resolution and its direct consumers.",
+      "Traces automatic prepared-context consumers separately from persisted artifact reads.",
+      "Names relevant Profile and prepared-context regression tests; returns no more than 20 files/tests.",
+      "Distinguishes service/backend boundaries and static evidence from dynamic assumptions."
+    ]
+  },
+  "release_gates": {
+    "integrity_failures": 0,
+    "supported_static_precision": 0.95,
+    "affected_test_recall_at_20": 0.9,
+    "repair_noninferiority_margin": -0.05,
+    "value_reduction_target": 0.2,
+    "cold_build_seconds_target": 60,
+    "ten_file_sync_seconds_target": 5,
+    "query_p95_seconds_target": 2,
+    "independent_human_evidence_review_required_for_release_claim": true
+  }
+}

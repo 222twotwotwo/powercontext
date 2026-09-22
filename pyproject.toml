@@ -37,6 +37,10 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+code = [
+    "tree-sitter==0.26.0",
+    "tree-sitter-python==0.25.0",
+]
 builtin = [
     "aiosqlite>=0.22,<1",
     "apscheduler>=3.11,<4",
@@ -92,6 +96,7 @@ cli = [
 powercontext = "powercontext.cli.app:main"
 
 [project.entry-points."powercontext.cli"]
+code = "powercontext.builtin.code.cli:app"
 config = "powercontext.cli.config:app"
 doctor = "powercontext.cli.system:doctor_app"
 service = "powercontext.service.cli:app"
@@ -118,6 +123,7 @@ notebooks = [
     "playwright>=1.55,<2",
 ]
 dev = [
+    "powercontext[code]",
     "datamodel-code-generator==0.64.0",
     "powercontext[cli,server]",
     "powercontext-langchain",

@@ -29,6 +29,12 @@ from powercontext.builtin.artifacts.profile.models import Profile
 from powercontext.builtin.artifacts.topic_memory import TopicMemory, TopicMemorySearchHit
 from powercontext.builtin.runtime.errors import PreparedContextInvariantError
 from powercontext.builtin.runtime.models import PrepareContextRequest, PreparedContext
+from powercontext.builtin.runtime.prepared_code import (
+    CodeEvidenceRef,
+    PreparedCodeCandidate,
+    assemble_code,
+    historical_request,
+)
 from powercontext.builtin.runtime.prepared_text import (
     TRUST_POLICY,
     ContextTextItem,
@@ -100,6 +106,7 @@ class PreparedContextBuild:
     context: PreparedContext
     origins: tuple[PreparedContextOrigin, ...]
     omissions: PreparedContextOmissions = PreparedContextOmissions()
+    code_origins: tuple[CodeEvidenceRef, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -202,7 +209,24 @@ class PreparedContextBuilder:
         topic_memory_hits: Sequence[TopicMemorySearchHit] = (),
         experience_candidates: Sequence[PreparedExperienceCandidates] = (),
         profile_candidates: Sequence[PreparedProfileCandidate] = (),
+        code_candidates: Sequence[PreparedCodeCandidate] = (),
     ) -> PreparedContextBuild:
+        if request.include_code:
+
+            def historical(history_request: PrepareContextRequest, entries: int) -> PreparedContextBuild:
+                builder = PreparedContextBuilder()
+                builder.entry_limit = entries
+                return builder.build_scopes_result(
+                    request=historical_request(history_request, entries),
+                    current_scope_id=current_scope_id,
+                    memory_candidates=memory_candidates,
+                    topic_memory_hits=topic_memory_hits,
+                    experience_candidates=experience_candidates,
+                    profile_candidates=profile_candidates,
+                )
+
+            return assemble_code(request, code_candidates, self.entry_limit, historical)
+
         if sum(len(candidates.hits) for candidates in memory_candidates) > self.memory_candidate_limit:
             raise PreparedContextInvariantError("memory-candidate-limit")
         if len(topic_memory_hits) > self.topic_memory_candidate_limit:
