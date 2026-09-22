@@ -17,6 +17,8 @@ from __future__ import annotations
 import asyncio
 from typing import cast
 
+from sqlalchemy import event
+
 from powercontext.builtin.artifacts.memory import (
     EmbeddingProfile,
     Memory,
@@ -171,6 +173,53 @@ def test_memory_entry_can_be_deactivated_and_reactivated_without_rewriting_conte
             assert restored.content.changes[0].op == "reactivate"
             assert restored.content.changes[0].reason == "resumed"
             assert (await service.entries(restored))[0] == entry
+
+    asyncio.run(scenario())
+
+
+def test_memory_append_projection_writes_do_not_grow_with_entry_history() -> None:
+    """One append must only rewrite the projections of the entry it changed (#1321)."""
+
+    async def scenario() -> None:
+        async with open_builtin_contexts(BuiltinConfig(database=SQLiteConfig())) as contexts:
+            service = (await contexts.get("lifecycle")).artifacts.memory
+            statements: list[str] = []
+
+            def record_statement(_connection: object, _cursor: object, statement: str, *_rest: object) -> None:
+                statements.append(statement)
+
+            async def append(memory, number: int):
+                return await service.remember(
+                    memory=memory,
+                    entries=(MemoryEntryInput(kind="fact", text=f"Bounded fact {number:04d}."),),
+                    mode="append",
+                )
+
+            async def measured_append(memory, number: int):
+                statements.clear()
+                engine = contexts.database.engine.sync_engine
+                event.listen(engine, "before_cursor_execute", record_statement)
+                try:
+                    updated = await append(memory, number)
+                finally:
+                    event.remove(engine, "before_cursor_execute", record_statement)
+                writes = len([
+                    statement
+                    for statement in statements
+                    if "pc_memory_entry_heads" in statement or "pc_memory_entry_fts" in statement
+                ])
+                return updated, writes
+
+            memory = None
+            for number in range(3):
+                memory = await append(memory, number)
+            memory, early_writes = await measured_append(memory, 3)
+            for number in range(4, 40):
+                memory = await append(memory, number)
+            _, late_writes = await measured_append(memory, 40)
+
+            assert early_writes == late_writes
+            assert early_writes <= 4
 
     asyncio.run(scenario())
 
