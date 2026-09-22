@@ -18,7 +18,7 @@ from typing import Any
 
 from powercontext.builtin.code.capture import check_deadline
 
-RESOLVER_BUILD = "python-static-2"
+RESOLVER_BUILD = "python-static-3"
 
 
 @dataclass(frozen=True)
@@ -41,6 +41,7 @@ class PythonResolver:
         self.bindings: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
         self.modules: dict[str, set[str]] = defaultdict(set)
         self.file_modules: dict[str, list[str]] = defaultdict(list)
+        self.rebound_targets: set[str] = set()
         for fact in facts:
             for binding in fact["bindings"]:
                 self.bindings[(binding["scope"], binding["name"])].append(binding)
@@ -48,6 +49,13 @@ class PythonResolver:
                 file_id = fact["nodes"][0]["id"]
                 self.modules[name].add(file_id)
                 self.file_modules[file_id].append(name)
+        # Collect all writes before resolving relationships, including writes in
+        # other modules or conditional code. Execution order is not static proof.
+        rebound_targets: set[str] = set()
+        for fact in facts:
+            for write in fact["attribute_writes"]:
+                rebound_targets.update(self.lookup(write["scope"], write["expression"], frozenset()).targets)
+        self.rebound_targets = rebound_targets
 
     def module_names(self, path: str) -> list[str]:
         if not path.endswith((".py", ".pyi")):
@@ -168,6 +176,12 @@ class PythonResolver:
         return Resolution(reason="local_binding")
 
     def members(self, target: str, suffix: list[str], visited: frozenset[tuple[str, str]]) -> Resolution:
+        result = self._members(target, suffix, visited)
+        if target in self.rebound_targets:
+            return Resolution(result.targets, "candidate", "attribute_rebinding", "attribute_rebinding")
+        return result
+
+    def _members(self, target: str, suffix: list[str], visited: frozenset[tuple[str, str]]) -> Resolution:
         if not suffix:
             return Resolution((target,))
         node = self.nodes[target]

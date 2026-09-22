@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -454,6 +455,57 @@ def test_response_budget_includes_envelope(repository):
     assert "output_budget" in result.limitations
 
 
+def test_response_rendering_uses_the_shared_query_deadline(repository, monkeypatch):
+    from powercontext.builtin.code import service as service_module
+
+    _, service = repository
+    monotonic = time.monotonic
+    serialize = service_module.json_bytes
+    elapsed = 0
+
+    def delayed_serialization(value):
+        nonlocal elapsed
+        content = serialize(value)
+        if isinstance(value, dict) and value.get("schema") == "powercontext.code-query.v1":
+            # Model time spent rendering without a slow or timing-sensitive sleep.
+            elapsed += service.config.limits.query_seconds
+        return content
+
+    monkeypatch.setattr(time, "monotonic", lambda: monotonic() + elapsed)
+    monkeypatch.setattr(service_module, "json_bytes", delayed_serialization)
+    with pytest.raises(CodeError, match="code_timeout"):
+        query(service, "symbols", query="prepare")
+
+
+def test_budgeted_source_keeps_complete_lines_and_matching_citations(repository):
+    import hashlib
+
+    root, service = repository
+    content = "".join(f'第 {index} 行包含引号 " 和反斜杠 \\\r\n' for index in range(100)).encode()
+    (root / "budgeted.md").write_bytes(content)
+    git(root, "add", ".")
+    fingerprint = service.sync("scope")["fingerprint"]
+    for budget in (1500, 1800):
+        result = query(
+            service,
+            "read",
+            expected=fingerprint,
+            path="budgeted.md",
+            file_sha256=hashlib.sha256(content).hexdigest(),
+            start_line=1,
+            end_line=100,
+            budget=budget,
+        )
+        assert result.status == "partial"
+        assert "output_budget" in result.limitations
+        assert len(result.model_dump_json(by_alias=True).encode()) <= budget
+        snippet = result.items[0]
+        assert 1 <= snippet["end_line"] < 100
+        expected = b"\n".join(content.split(b"\n")[: snippet["end_line"]]) + b"\n"
+        assert snippet["content"].encode() == expected
+        assert snippet["snippet_sha256"] == hashlib.sha256(expected).hexdigest()
+
+
 def test_query_rejects_ambiguous_paths_and_missing_fingerprint():
     from pydantic import ValidationError
 
@@ -492,6 +544,149 @@ def test_loop_binding_does_not_invent_global_call(repository):
     service.sync("scope")
     fingerprint, symbol = definition(service, "fit", "src/sample/shadow.py")
     assert query(service, "callers", expected=fingerprint, symbol_id=symbol["id"]).items == []
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        "{'callback': target}",
+        "{'callback': _, **target}",
+        "[target, *rest]",
+        "[first, *target]",
+        "Thing(callback=target)",
+        "Thing(target)",
+        "[first] as target",
+        "(target, 1) | (target, 2)",
+        "target",
+    ],
+)
+def test_match_captures_do_not_resolve_to_global_functions(repository, pattern):
+    root, service = repository
+    (root / "patterns.py").write_text(
+        "def target(): return 'global'\n"
+        "def run(value):\n"
+        "    match value:\n"
+        f"        case {pattern} if target:\n"
+        "            return target()\n"
+    )
+    git(root, "add", ".")
+    service.sync("scope")
+    fingerprint, caller = definition(service, "run", "patterns.py")
+    assert query(service, "callees", expected=fingerprint, symbol_id=caller["id"]).items == []
+    _, target = definition(service, "target", "patterns.py")
+    assert query(service, "callers", expected=fingerprint, symbol_id=target["id"]).items == []
+
+
+def test_match_value_and_class_patterns_do_not_bind_names(repository):
+    root, service = repository
+    (root / "patterns.py").write_text(
+        "class Thing: pass\n"
+        "def callback(): pass\n"
+        "def run(value):\n"
+        "    match value:\n"
+        "        case Thing(callback=captured):\n"
+        "            return Thing(), callback()\n"
+        "        case Thing.CONSTANT:\n"
+        "            return Thing(), callback()\n"
+    )
+    git(root, "add", ".")
+    service.sync("scope")
+    fingerprint, caller = definition(service, "run", "patterns.py")
+    callees = query(service, "callees", expected=fingerprint, symbol_id=caller["id"])
+    assert {item["name"] for item in callees.items} == {"Thing", "callback"}
+    assert all(item["resolution"] == "resolved_static" for item in callees.items)
+
+
+@pytest.mark.parametrize(
+    "assignment",
+    [
+        "lib.original = replacement",
+        "lib.original, other = replacement, None",
+        "lib.original += replacement",
+        "del lib.original",
+        "def patch():\n    lib.original = replacement",
+        "lib.Box.original = replacement",
+    ],
+)
+def test_attribute_rebinding_downgrades_calls_through_import_aliases(repository, assignment):
+    root, service = repository
+    (root / "lib.py").write_text(
+        "def original(): return 'original'\n"
+        "def untouched(): return 'untouched'\n"
+        "class Box:\n    def original(): return 'original'\n"
+    )
+    member = "Box.original" if "Box" in assignment else "original"
+    (root / "patches.py").write_text(
+        f"import lib\ndef replacement(): return 'replacement'\n{assignment}\n"
+        f"def run(): return lib.{member}(), lib.untouched()\n"
+    )
+    (root / "consumer.py").write_text(
+        f"import lib as alias\ndef consume(): return alias.{member}()\n"
+        + ("from lib import original as saved\ndef copied(): return saved()\n" if member == "original" else "")
+    )
+    git(root, "add", ".")
+    service.sync("scope")
+    for path, name in [("patches.py", "run"), ("consumer.py", "consume")]:
+        fingerprint, caller = definition(service, name, path)
+        callees = query(service, "callees", expected=fingerprint, symbol_id=caller["id"])
+        originals = [item for item in callees.items if item["name"] == "original"]
+        assert originals
+        assert all(item["resolution"] == "candidate" for item in originals)
+        assert all(item["resolution"] == "resolved_static" for item in callees.items if item["name"] == "untouched")
+    if member == "original":
+        _, caller = definition(service, "copied", "consumer.py")
+        assert all(
+            item["resolution"] == "candidate"
+            for item in query(service, "callees", expected=fingerprint, symbol_id=caller["id"]).items
+        )
+
+
+def test_depth_limited_test_search_reports_partial_only_with_remaining_work(repository):
+    root, service = repository
+    (root / "step0.py").write_text("def step0(): return 1\n")
+    for index in range(1, 8):
+        (root / f"step{index}.py").write_text(
+            f"from step{index - 1} import step{index - 1}\ndef step{index}(): return step{index - 1}()\n"
+        )
+    (root / "tests/test_chain.py").write_text("from step7 import step7\ndef test_chain(): assert step7() == 1\n")
+    (root / "cycle.py").write_text("def first(): return second()\ndef second(): return first()\n")
+    git(root, "add", ".")
+    service.sync("scope")
+    fingerprint, leaf = definition(service, "step0", "step0.py")
+    tests = query(service, "affected_tests", expected=fingerprint, paths=["step0.py"])
+    assert tests.items == []
+    assert tests.status == "partial"
+    assert "depth_limit" in tests.limitations
+    impact = query(service, "impact", expected=fingerprint, symbol_id=leaf["id"], depth=1)
+    assert impact.status == "partial"
+    assert "depth_limit" in impact.limitations
+    nearby = query(service, "affected_tests", expected=fingerprint, paths=["step6.py"])
+    assert any(item["path"] == "tests/test_chain.py" for item in nearby.items)
+    assert nearby.status == "ok"
+    assert "depth_limit" not in nearby.limitations
+    _, cycle = definition(service, "first", "cycle.py")
+    complete_cycle = query(service, "impact", expected=fingerprint, symbol_id=cycle["id"], depth=1)
+    assert complete_cycle.status == "ok"
+    assert "depth_limit" not in complete_cycle.limitations
+    scoped = query(service, "impact", expected=fingerprint, symbol_id=leaf["id"], depth=1, path_prefix="step0.py")
+    assert scoped.status == "ok"
+    assert "depth_limit" not in scoped.limitations
+
+
+def test_large_changes_response_obeys_elapsed_and_byte_budgets(repository):
+    root, service = repository
+    for index in range(5000):
+        (root / f"note{index:04}.md").write_text("# Small change\n")
+    git(root, "add", ".")
+    service.sync("scope")
+    started = time.monotonic()
+    result = query(service, "changes")
+    elapsed = time.monotonic() - started
+    assert elapsed < service.config.limits.query_seconds + 1
+    assert len(result.model_dump_json(by_alias=True).encode()) <= 16000
+    assert result.items
+    assert result.status == "partial"
+    assert "output_budget" in result.limitations
 
 
 def test_corrupt_database_fails_closed_and_sync_repairs(repository):

@@ -403,13 +403,14 @@ class CodeService:
                 coverage={**generation.manifest["coverage"], "path_boundary_edges": engine.boundary_edges},
                 limitations=sorted(engine.limitations),
             )
-            return self._budget(result, request.max_bytes)
+            return self._budget(result, request.max_bytes, deadline)
 
     def _change_query(self, request: CodeQueryRequest, engine: GraphQuery, before: Generation) -> list[dict[str, Any]]:
         previous_files = before.manifest["included_files"]
         current_files = engine.generation.manifest["included_files"]
         changes = []
         for path in sorted(previous_files.keys() | current_files.keys()):
+            check_deadline(engine.deadline)
             old, new = previous_files.get(path), current_files.get(path)
             if old and new and old["sha256"] == new["sha256"] and old["mode"] == new["mode"]:
                 continue
@@ -453,24 +454,59 @@ class CodeService:
 
     @staticmethod
     @observed("render_result")
-    def _budget(result: CodeQueryResult, maximum: int) -> CodeQueryResult:
+    def _budget(result: CodeQueryResult, maximum: int, deadline: float) -> CodeQueryResult:
+        check_deadline(deadline)
         data = result.model_dump(mode="json", by_alias=True)
-        while len(json_bytes(data)) > maximum and data["items"]:
-            data["status"] = "partial"
-            if "output_budget" not in data["limitations"]:
-                data["limitations"].append("output_budget")
-            item = data["items"][-1]
-            content = item.get("content")
-            lines = source_lines(content) if isinstance(content, str) else []
-            if len(lines) > 1:
-                reduced = "".join(lines[:-1])
-                item.update(
-                    content=reduced,
-                    end_line=item["start_line"] + len(lines) - 2,
-                    snippet_sha256=digest_bytes(reduced.encode()),
-                )
-            else:
-                data["items"].pop()
-        if len(json_bytes(data)) > maximum:
+        items, data["items"] = data["items"], []
+        sizes = []
+        for item in items:
+            check_deadline(deadline)
+            sizes.append(len(json_bytes(item)))
+        size = len(json_bytes(data))
+        if size + sum(sizes) + max(0, len(items) - 1) <= maximum:
+            check_deadline(deadline)
+            return result
+        data["status"] = "partial"
+        if "output_budget" not in data["limitations"]:
+            data["limitations"].append("output_budget")
+        size = len(json_bytes(data))
+        if size > maximum:
             raise CodeError("budget_too_small", status=422)
-        return CodeQueryResult.model_validate(data)
+        for item, item_size in zip(items, sizes, strict=True):
+            check_deadline(deadline)
+            separator = int(bool(data["items"]))
+            available = maximum - size - separator
+            if item_size <= available:
+                data["items"].append(item)
+                size += item_size + separator
+                continue
+            fitted = CodeService._fit_source(item, available, deadline)
+            if fitted is not None:
+                data["items"].append(fitted)
+            break
+        fitted_result = CodeQueryResult.model_validate(data)
+        check_deadline(deadline)
+        return fitted_result
+
+    @staticmethod
+    def _fit_source(item: dict[str, Any], maximum: int, deadline: float) -> dict[str, Any] | None:
+        content = item.get("content")
+        lines = source_lines(content) if isinstance(content, str) else []
+        low, high = 1, len(lines) - 1
+        fitted = None
+        while low <= high:
+            check_deadline(deadline)
+            count = (low + high) // 2
+            reduced = "".join(lines[:count])
+            candidate = {
+                **item,
+                "content": reduced,
+                "end_line": item["start_line"] + count - 1,
+                "snippet_sha256": digest_bytes(reduced.encode()),
+            }
+            if len(json_bytes(candidate)) <= maximum:
+                fitted = candidate
+                low = count + 1
+            else:
+                high = count - 1
+        return fitted

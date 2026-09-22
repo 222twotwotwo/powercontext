@@ -235,13 +235,18 @@ class GraphQuery:
         pending = deque((node, [], 0, False, False) for node in seeds)
         visited = {(node["id"], False) for node in seeds}
         reached: dict[tuple[str, bool], tuple[dict[str, Any], list[dict[str, Any]], bool]] = {}
+        cutoffs: list[tuple[str, bool]] = []
         edge_count = 0
         while pending:
             check_deadline(self.deadline)
             node, witness, distance, coarse, candidate = pending.popleft()
             if (witness or (tests and is_test(node))) and (not tests or is_test(node)):
                 reached.setdefault((node["id"], candidate), (node, witness, coarse))
+            if impact and not self.truncated:
+                self.enqueue_parent(connection, node, witness, distance, candidate, prefix, pending, visited)
             if distance >= depth:
+                if impact:
+                    cutoffs.append((node["id"], candidate))
                 continue
             for edge, neighbor in self.neighbors(connection, node["id"], prefix, reverse=reverse, impact=impact):
                 edge_count += 1
@@ -255,9 +260,22 @@ class GraphQuery:
                 if key not in visited:
                     visited.add(key)
                     pending.append((neighbor, [*witness, edge], distance + 1, coarse, uncertain))
-            if impact and not self.truncated:
-                self.enqueue_parent(connection, node, witness, distance, candidate, prefix, pending, visited)
+        self.check_depth_cutoffs(connection, cutoffs, visited, prefix, reverse=reverse, impact=impact)
         return self.walk_results(reached, maximum)
+
+    def check_depth_cutoffs(self, connection, cutoffs, visited, prefix, *, reverse: bool, impact: bool) -> None:
+        # A cutoff is partial only when eligible work is still unseen after all
+        # queued paths finish. Cycles and paths outside the requested scope do not
+        # imply an omitted result. Direct callers/callees are one-hop operations.
+        for node_id, candidate in cutoffs:
+            check_deadline(self.deadline)
+            if any(
+                (neighbor["id"], candidate or edge["resolution"] != "resolved_static") not in visited
+                for edge, neighbor in self.neighbors(connection, node_id, prefix, reverse=reverse, impact=impact)
+            ):
+                self.truncated = True
+                self.limitations.add("depth_limit")
+                break
 
     def enqueue_parent(self, connection, node, witness, distance, candidate, prefix, pending, visited) -> None:
         if node["parent_id"] is None:

@@ -23,7 +23,7 @@ from powercontext.builtin.code.errors import CodeError
 if TYPE_CHECKING:
     from tree_sitter import Node
 
-PARSER_BUILD = "tree-sitter-0.26.0/python-0.25.0/extract-4"
+PARSER_BUILD = "tree-sitter-0.26.0/python-0.25.0/extract-5"
 FACTS_SCHEMA = 1
 _DOTTED_NAME = re.compile(r"^[A-Za-z_\w]+(?:\.[A-Za-z_\w]+)*$", re.UNICODE)
 
@@ -102,6 +102,7 @@ class _FactCollector:
         self.nodes: list[dict[str, Any]] = [self.file]
         self.references: list[dict[str, Any]] = []
         self.bindings: list[dict[str, Any]] = []
+        self.attribute_writes: list[dict[str, Any]] = []
         self.errors: list[dict[str, Any]] = []
         self.exports: list[str] | None = None
 
@@ -129,6 +130,7 @@ class _FactCollector:
             "nodes": self.nodes,
             "references": self.references,
             "bindings": self.bindings,
+            "attribute_writes": self.attribute_writes,
             "exports": self.exports,
             "errors": self.errors,
         }
@@ -151,6 +153,9 @@ class _FactCollector:
         if node.type in {"import_statement", "import_from_statement"}:
             self.imports(node, scope)
             return []
+        if node.type == "case_pattern":
+            self.match_pattern(node, scope)
+            return []
         self.record_expression(node, scope)
         return [(child, scope) for child in reversed(node.named_children)]
 
@@ -172,7 +177,7 @@ class _FactCollector:
             self.bind_pattern(node.child_by_field_name("left"), scope)
         elif node.type == "as_pattern":
             self.bind_pattern(node.child_by_field_name("alias"), scope)
-        elif node.type in {"global_statement", "nonlocal_statement"}:
+        elif node.type in {"global_statement", "nonlocal_statement", "delete_statement"}:
             for child in node.named_children:
                 self.bind_pattern(child, scope)
         if node.type == "call":
@@ -185,13 +190,60 @@ class _FactCollector:
             self.reference(node, scope, "references")
 
     def bind_pattern(self, node: Node | None, scope: dict[str, Any]) -> None:
-        if node is None or node.type in {"attribute", "subscript"}:
+        if node is None or node.type == "subscript":
+            return
+        if node.type == "attribute":
+            self.attribute_writes.append({"scope": scope["id"], "expression": self.text(node)})
             return
         if node.type == "identifier":
             self.bindings.append({"scope": scope["id"], "name": self.text(node), "kind": "local"})
             return
         for child in node.named_children:
             self.bind_pattern(child, scope)
+
+    def match_pattern(self, node: Node, scope: dict[str, Any]) -> None:
+        # A single name captures; dotted values, class names and keyword labels do
+        # not. Skip normal expression walking so captures never become references.
+        if node.type == "ERROR" or node.is_missing:
+            self.errors.append({"reason": "parse_error", "line": self.line(node.start_byte)})
+            return
+        if node.type == "dotted_name":
+            if len(node.named_children) == 1:
+                self.bind_pattern(node, scope)
+            else:
+                self.reference(node, scope, "references")
+            return
+        if node.type == "identifier":
+            if self.text(node) != "_":
+                self.bind_pattern(node, scope)
+            return
+        for child in self.match_children(node, scope):
+            self.match_pattern(child, scope)
+
+    def match_children(self, node: Node, scope: dict[str, Any]) -> list[Node]:
+        if node.type == "dict_pattern":
+            for key in node.children_by_field_name("key"):
+                if key.type == "dotted_name":
+                    self.reference(key, scope, "references")
+            return [
+                *node.children_by_field_name("value"),
+                *(child for child in node.named_children if child.type in {"splat_pattern", "ERROR"}),
+            ]
+        if node.type == "class_pattern":
+            self.reference(node.named_children[0], scope, "references")
+            return node.named_children[1:]
+        if node.type == "keyword_pattern":
+            return node.named_children[1:]
+        if node.type in {
+            "case_pattern",
+            "list_pattern",
+            "tuple_pattern",
+            "union_pattern",
+            "as_pattern",
+            "splat_pattern",
+        }:
+            return node.named_children
+        return []
 
     @staticmethod
     def conditional(node: Node) -> bool:
@@ -368,6 +420,7 @@ def text_facts(path: str, content: bytes) -> dict[str, Any]:
         "nodes": [node],
         "references": [],
         "bindings": [],
+        "attribute_writes": [],
         "exports": None,
         "errors": [],
     }
