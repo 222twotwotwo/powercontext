@@ -8730,6 +8730,9 @@ components:
         languages:
           default:
           - python
+          - javascript
+          - typescript
+          - go
           items:
             type: string
           type: array

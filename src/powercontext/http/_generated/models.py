@@ -1590,7 +1590,7 @@ class CodeStatus(BaseModel):
     freshness: Freshness = Freshness.UNKNOWN
     fingerprint: Annotated[StrictStr | None, Field(pattern="^[0-9a-f]{64}$")] = None
     engine: StrictStr = "powercontext-native-v1"
-    languages: list[StrictStr] = ["python"]
+    languages: list[StrictStr] = ["python", "javascript", "typescript", "go"]
     operations: list[StrictStr] = [
         "status",
         "map",

@@ -1,6 +1,6 @@
 ---
 title: 理解当前 Git 仓库
-description: 为 Python 工作区建立本地代码索引，定位定义、分析关系，并在修改后同步和核对证据。
+description: 为多语言 Git 工作区建立本地代码索引，定位定义、分析关系，并在修改后同步和核对证据。
 ---
 
 # 理解当前 Git 仓库
@@ -9,11 +9,33 @@ Memory 保存历史决策与约束；代码查询提供当前工作区的定义�
 两者组合时，Agent 可以同时回答“此前为什么这样设计”和“现在代码实际如何实现”。
 代码索引是可重建的本机缓存，不会把每个函数创建为 Memory、Source 或 Artifact，也不新增业务数据库表。
 
-本能力默认关闭。结构分析支持 UTF-8 Python，使用 Tree-sitter 提取语法，再保守地解析仓库内引用。
+本能力默认关闭。结构分析支持 UTF-8 Python、TypeScript/JavaScript（含 TSX/JSX）和 Go，使用 Tree-sitter 提取语法，再保守地解析仓库内引用。
 它不需要生成模型、Embedding、Node.js 或 CodeGraph 服务。动态分派、反射、框架隐含调用及不支持的语法可能缺失；
 `candidate` 关系只表示线索，不能当作运行时调用证明。
 本机索引目前在 Linux 验证，依赖 POSIX 文件锁、进程资源限制和 SQLite FTS5；其他系统可通过 HTTP 使用该服务。
 macOS 和 Windows 的本机索引尚未验收。
+
+## 多语言范围
+
+同一个 Scope 可以绑定包含 Python、TypeScript/JavaScript 和 Go 的混合仓库，无需逐语言创建索引。
+语言由文件扩展名识别；`.jsx` 使用 JavaScript grammar，`.tsx` 使用独立的 TSX grammar。
+
+| 语言 | 文件 | 结构和静态关系 |
+| --- | --- | --- |
+| Python | `.py`、`.pyi` | 类、函数、方法、词法作用域、显式导入及别名、相对导入和静态重导出 |
+| JavaScript / TypeScript | `.js`、`.jsx`、`.mjs`、`.cjs`、`.ts`、`.tsx`、`.mts`、`.cts` | 函数、箭头函数、类和方法；TS 接口、类型及枚举；相对 ESM 导入、具名/默认导出、别名和具名重导出 |
+| Go | `.go`，模块身份取自 `go.mod` | 函数、方法、结构体、接口及类型；同包跨文件调用、当前模块内的显式包导入及别名 |
+
+所有语言共用源码摘要、索引代次、查询预算和 `prepare_context`。查询证据包含 `language`，
+`coverage.languages` 分别统计各语言文件的 `ok`、`partial`、`failed` 数量；文件被发现不等于结构解析成功。
+JS/TS 的 `.test`、`.spec`、`__tests__` 和 Go 的 `_test.go` 参与测试候选发现，名称匹配始终标为 `candidate`。
+
+JS/TS 不解析 CommonJS 模块关系、包导出映射、tsconfig 路径别名、通配重导出、继承分派或类型推断；
+Go 不执行工具链，不解析 workspace/replace 依赖、接口分派或方法接收者类型。
+Go 条件编译文件仍可检索，其相关关系降为候选，不按当前机器选择构建目标。
+动态接收者、参数遮蔽及无法唯一绑定的名称不会被当作确定调用；候选或未解析原因保留在索引诊断中。
+混合语言检索不推断 Python、JS/TS 和 Go 之间的 HTTP、RPC 或 FFI 调用。
+其他受支持文本文件保留文件导航和源码读取能力。
 
 ## 配置并构建
 
@@ -29,7 +51,7 @@ POWERCONTEXT_SERVER_CODE='{"enabled":true,"cache_dir":"/srv/powercontext/code-ca
 
 缓存必须位于仓库之外。默认只读取 Git 跟踪文件，并按文件名排除常见凭据文件，同时排除符号链接、二进制和构建产物。
 需要分析未跟踪文件时，在该绑定中设置 `"include_untracked": true`；Git ignore 规则仍然生效。
-`exclude` 接受仓库相对路径 glob；`source_roots` 只影响导入解析，不扩大目录访问范围。
+`exclude` 接受仓库相对路径 glob；`source_roots` 只影响 Python 导入解析，不扩大目录访问范围。
 
 ```bash
 powercontext code index --scope scp_demo --env-file /srv/powercontext/server.env
@@ -115,6 +137,7 @@ RSS 字段是进程生命周期的高水位，父进程和已回收子进程分�
 ## 可选的自动上下文
 
 `prepare_context` 默认不查询代码。请求中设置 `"include_code": true` 才会执行一次 `explore` 并合并代码候选。
+多语言候选由同一次查询召回、按统一预算排序和裁剪，不会为每种语言单独占用预算。
 PreparedContext 继续使用原有四字段响应，代码引用单独保留为临时证据，不伪造 Artifact 引用。
 
 - 省略 `assembly`：保持既有 Memory、Experience、Topic Memory 选择。

@@ -31,7 +31,8 @@ from powercontext.builtin.code.capture import (
     write_private,
 )
 from powercontext.builtin.code.errors import CodeError
-from powercontext.builtin.code.extract import PARSER_BUILD, extraction_key
+from powercontext.builtin.code.extract import extraction_key
+from powercontext.builtin.code.languages import LANGUAGES, parser_builds
 from powercontext.builtin.code.models import (
     CodeConfig,
     CodeQueryRequest,
@@ -42,7 +43,7 @@ from powercontext.builtin.code.models import (
 )
 from powercontext.builtin.code.process import extract_jobs
 from powercontext.builtin.code.query import GraphQuery
-from powercontext.builtin.code.resolve import RESOLVER_BUILD, PythonResolver
+from powercontext.builtin.code.resolve_polyglot import RESOLVER_BUILDS, resolve_facts
 from powercontext.builtin.code.store import SCHEMA_VERSION, create_graph, open_graph
 from powercontext.builtin.code.telemetry import observed, stage
 
@@ -143,7 +144,7 @@ class CodeService:
                     }
                 facts, entries, extracted = self._facts(staging, captured, previous, deadline, full=full)
                 with stage("resolve") as attributes:
-                    edges, diagnostics = PythonResolver(facts, repository.source_roots, deadline).resolve()
+                    edges, diagnostics = resolve_facts(facts, repository.source_roots, deadline)
                     attributes.update(edge_count=len(edges), diagnostic_count=sum(map(len, diagnostics.values())))
                 nodes = [node for fact in facts for node in fact["nodes"]]
                 with stage("store"):
@@ -195,8 +196,8 @@ class CodeService:
                 "binding": binding,
                 "capture": capture.identity(),
                 "repository_policy": repository.model_dump(mode="json"),
-                "parser": PARSER_BUILD,
-                "resolver": RESOLVER_BUILD,
+                "parser": parser_builds(),
+                "resolver": RESOLVER_BUILDS,
                 "schema": SCHEMA_VERSION,
             })
         )
@@ -272,11 +273,11 @@ class CodeService:
         coverage = {
             "eligible_files": len(entries),
             "parsed_files": sum(
-                entry["language"] == "python" and entry["parse_status"] == "ok" for entry in entries.values()
+                entry["language"] in LANGUAGES and entry["parse_status"] == "ok" for entry in entries.values()
             ),
             "partial_files": sum(entry["parse_status"] == "partial" for entry in entries.values()),
             "failed_files": sum(entry["parse_status"] == "failed" for entry in entries.values()),
-            "unsupported_files": sum(entry["language"] != "python" for entry in entries.values()),
+            "unsupported_files": sum(entry["language"] not in LANGUAGES for entry in entries.values()),
             "skipped_files": len(capture.files) - len(entries) + capture.invalid_paths,
             "references": sum(len(fact["references"]) for fact in facts),
             "resolved_references": len({
@@ -289,6 +290,18 @@ class CodeService:
             }),
             "unresolved_references": sum(not item["candidates"] for issues in diagnostics.values() for item in issues),
         }
+        coverage["languages"] = {
+            language: {
+                "files": sum(entry["language"] == language for entry in entries.values()),
+                **{
+                    status: sum(
+                        entry["language"] == language and entry["parse_status"] == status for entry in entries.values()
+                    )
+                    for status in ("ok", "partial", "failed")
+                },
+            }
+            for language in LANGUAGES
+        }
         return {
             "schema": SCHEMA_VERSION,
             "binding_id": binding,
@@ -298,8 +311,8 @@ class CodeService:
             "commit": capture.commit,
             "git_object_format": capture.object_format,
             "dirty": capture.dirty,
-            "parser_build": PARSER_BUILD,
-            "resolver_build": RESOLVER_BUILD,
+            "parser_build": parser_builds(),
+            "resolver_build": RESOLVER_BUILDS,
             "included_files": entries,
             "coverage": coverage,
             "created_at": _now(),
@@ -311,8 +324,8 @@ class CodeService:
         if captured.content_identity != generation.manifest["capture_identity"]:
             raise CodeError("code_changed", status=409)
         if (
-            generation.manifest["parser_build"] != PARSER_BUILD
-            or generation.manifest["resolver_build"] != RESOLVER_BUILD
+            generation.manifest["parser_build"] != parser_builds()
+            or generation.manifest["resolver_build"] != RESOLVER_BUILDS
         ):
             raise CodeError("code_changed", status=409)
 

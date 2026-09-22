@@ -14,12 +14,18 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections import deque
-from pathlib import PurePosixPath
 from typing import Any
 
 from powercontext.builtin.code.cache import Generation
 from powercontext.builtin.code.capture import check_deadline, digest_bytes, source_lines
 from powercontext.builtin.code.errors import CodeError
+from powercontext.builtin.code.languages import (
+    LANGUAGE_LIMITATIONS,
+    LANGUAGES,
+    is_test_path,
+    language_for_path,
+    test_stem,
+)
 from powercontext.builtin.code.models import (
     CodeQueryRequest,
     MapOperation,
@@ -37,8 +43,7 @@ def within(path: str, prefix: str) -> bool:
 
 
 def is_test(node: dict[str, Any]) -> bool:
-    name = PurePosixPath(node["path"]).name
-    return (name.startswith("test_") or name.endswith("_test.py")) and name.endswith(".py")
+    return is_test_path(node["path"])
 
 
 class GraphQuery:
@@ -46,6 +51,9 @@ class GraphQuery:
         self.generation = generation
         self.deadline = deadline
         self.limitations: set[str] = {"static_analysis_only", "dynamic_relationships_may_be_missing"}
+        for language, counts in generation.manifest["coverage"].get("languages", {}).items():
+            if counts["files"]:
+                self.limitations.update(LANGUAGE_LIMITATIONS[language])
         self.truncated = False
         self.boundary_edges = 0
         self._counted_boundaries: set[tuple[str, bool, bool]] = set()
@@ -54,6 +62,7 @@ class GraphQuery:
         fields = (
             "id",
             "kind",
+            "language",
             "name",
             "qualified_name",
             "path",
@@ -194,7 +203,7 @@ class GraphQuery:
             if row is None:
                 raise CodeError("code_target_missing", status=422)
             node = json.loads(row[0])
-            if node["language"] != "python":
+            if node["language"] not in LANGUAGES:
                 raise CodeError("unsupported_capability", status=501)
             nodes.append(node)
         return nodes
@@ -354,7 +363,7 @@ class GraphQuery:
         self.limitations.add("test_candidates_do_not_replace_required_tests")
         if len(items) >= operation.limit:
             return items
-        stems = {PurePosixPath(path).stem for path in operation.paths}
+        stems = {(language_for_path(path), test_stem(path)) for path in operation.paths}
         existing = {item["path"] for item in items}
         clause, parameters = path_clause(operation.path_prefix)
         for row in connection.execute(
@@ -363,11 +372,14 @@ class GraphQuery:
         ):
             check_deadline(self.deadline)
             node = json.loads(row[0])
-            stem = PurePosixPath(node["path"]).stem
             if (
                 node["path"] in existing
                 or not is_test(node)
-                or not any(stem in {f"test_{name}", f"{name}_test"} for name in stems)
+                or not any(
+                    test_stem(node["path"]) == stem
+                    and (node["language"] == language or {node["language"], language} <= {"javascript", "typescript"})
+                    for language, stem in stems
+                )
             ):
                 continue
             item = self.evidence(node, include_source=False)

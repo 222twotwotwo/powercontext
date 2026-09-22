@@ -16,6 +16,8 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints, field_validator, model_validator
 
+from powercontext.builtin.code.languages import SUPPORTED_LANGUAGES
+
 Fingerprint = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 
 
@@ -222,7 +224,7 @@ class CodeStatus(CodeModel):
     freshness: Literal["fresh", "stale", "unknown"] = "unknown"
     fingerprint: Fingerprint | None = None
     engine: str = "powercontext-native-v1"
-    languages: tuple[str, ...] = ("python",)
+    languages: tuple[str, ...] = SUPPORTED_LANGUAGES
     operations: tuple[str, ...] = (
         "status",
         "map",

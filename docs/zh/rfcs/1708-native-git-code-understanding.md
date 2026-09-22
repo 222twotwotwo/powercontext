@@ -19,7 +19,7 @@ description: 设计 PowerContext 内的原生符号索引、跨文件关系、�
 
 现有业务数据库不新增表。代码缓存仅包含 `code_nodes`、`code_edges` 两张普通表和 `code_search_fts` 一张全文索引虚拟表；文件清单、构建元数据及每文件原始解析事实保存为随索引原子发布的缓存文件。
 
-Python 仓库已具备显式闭环：**索引仓库 → 定位入口 → 展开关系 → 阅读证据 → 修改代码 → 增量同步 → 复核影响与测试**。CLI、Runtime、Client、HTTP/MCP、可选 PreparedContext 和 Codex/Claude Code Hook 已接入，默认关闭。安装和调用见[仓库代码工作流](../docs/workflows/repository-code.md)。A/B 的主要对照是 CodeGraph 核心引擎与原生引擎，另设普通搜索/读取基线；自动加入 PreparedContext 作为独立实验。本文的质量、成本与性能门槛是发布判据，不代表已达标的承诺。
+Python、TypeScript/JavaScript 和 Go 混合仓库已具备显式闭环：**索引仓库 → 定位入口 → 展开关系 → 阅读证据 → 修改代码 → 增量同步 → 复核影响与测试**。CLI、Runtime、Client、HTTP/MCP、可选 PreparedContext 和 Codex/Claude Code Hook 已接入，默认关闭。安装和调用见[仓库代码工作流](../docs/workflows/repository-code.md)。A/B 的主要对照是 CodeGraph 核心引擎与原生引擎，另设普通搜索/读取基线；自动加入 PreparedContext 作为独立实验。本文的质量、成本与性能门槛是发布判据，不代表已达标的承诺。
 
 # Motivation
 
@@ -97,15 +97,15 @@ Agent 先得到定义、少量直接关系及相应源码位置。继续展开�
 
 | 能力 | 首期验收范围 | 不作出的保证 |
 | --- | --- | --- |
-| 仓库地图 | 目录、Python 文件、定义签名、导入和测试入口线索 | 自动解释整个业务架构 |
+| 仓库地图 | 目录、多语言文件、定义签名、导入和测试入口线索 | 自动解释整个业务架构 |
 | 符号检索 | 名称、限定名、路径、签名、文档字符串；README 标题导航 | 任意纯中文问题都能准确匹配英文实现 |
-| 调用关系 | Python 词法作用域、显式导入及别名、相对导入、可解释的静态接收者线索 | 完整运行时调用图、动态类型证明 |
+| 调用关系 | 各语言词法作用域、显式导入及别名、ESM 导出、Go 包内关系和可解释的接收者线索 | 完整运行时调用图、动态类型证明 |
 | 影响分析 | 调用、导入、继承、引用的有界反向路径 | 完整数据流、所有副作用、无遗漏的安全结论 |
 | 测试关联 | 静态调用/导入路径和明确标注的名称/目录线索 | 自动决定哪些测试可以不跑 |
 | 更新 | 新增、修改、删除、重命名、分支切换、工作区修改 | 首期分布式构建或实时 watcher |
 | 其他语言 | 文件树与受限文本读取，能力列表标注 unsupported | 用空图冒充支持 |
 
-TypeScript/JavaScript 是第二阶段候选，只有独立语言验收和真实任务评测通过后才进入支持列表。代码外的文档只辅助导航，不生成调用边。首期不克隆远程 Git、不下载依赖、不执行仓库代码、不建立跨仓库图。
+首批语言为 Python、TypeScript/JavaScript（含 TSX/JSX）和 Go，允许在同一仓库混用。具体扩展名与静态关系边界见[仓库代码工作流](../docs/workflows/repository-code.md#多语言范围)。代码外的文档只辅助导航，不生成调用边。首期不克隆远程 Git、不下载依赖、不执行仓库代码、不建立跨仓库图。
 
 ## 与历史上下文协作
 
@@ -138,13 +138,13 @@ flowchart TD
 | --- | --- |
 | CodeService | Scope/绑定校验、索引生命周期、统一截止时间、固定一次查询的 generation |
 | RepositoryCapture | Git 文件清单、文件范围过滤、安全读取、manifest 与内容摘要 |
-| PythonExtractor | 只从输入字节提取声明、作用域、引用、调用点与解析错误 |
-| PythonResolver | 模块映射、导入和名称绑定、关系依据、未解析/歧义引用 |
+| 语言提取器 | 只从输入字节提取声明、作用域、引用、调用点与解析错误 |
+| 语言关系解析器 | 模块映射、导入和名称绑定、关系依据、未解析/歧义引用 |
 | GraphStore | 节点、关系、FTS 三张逻辑表，以及配套缓存文件的原子发布与读者生命周期 |
 | CodeQueryEngine | 地图、检索、探索、遍历、影响与测试候选 |
 | CodeEvidenceRenderer | 出处完整性、去重、范围裁剪和有界输出 |
 
-原生引擎直接使用固定版本的 Python Tree-sitter binding 和 Python grammar，通过可选 `code` extra 安装并锁入 `uv.lock`。不依赖 CodeGraph 的解析器、npm 运行时或私有节点结构。解析器在受资源限制的工作进程执行，避免大文件或异常语法阻塞服务事件循环。安装验收覆盖项目支持的 Python 版本及 wheel/sdist；缺少可用解析器时报不可用，不在生产启动时临时下载 grammar。
+原生引擎直接使用固定版本的 Python Tree-sitter binding，以及 Python、JavaScript、TypeScript/TSX、Go grammar，通过可选 `code` extra 安装并锁入 `uv.lock`。不依赖 CodeGraph 的解析器、npm 运行时或私有节点结构。解析器在受资源限制的工作进程执行，避免大文件或异常语法阻塞服务事件循环。安装验收覆盖项目支持的 Python 版本及 wheel/sdist；缺少可用解析器时报告解析失败，不在生产启动时临时下载 grammar。
 
 缓存采用标准 SQLite/FTS5，不走 Memory 的业务数据库抽象。因此 PowerContext 使用 SQLite、OceanBase 或 seekdb 时，代码索引仍然是仓库所在主机的可重建缓存；首期不承诺多副本共享查询。启动时检查 FTS5 能力，缺失时明确失败，不静默切换到质量不同的引擎。
 
@@ -193,11 +193,15 @@ fingerprint = sha256(canonical_encoding(
 
 符号 ID 由路径、种类、词法限定名和声明字节位置生成，引用时必须同时带 fingerprint；不承诺移动或改名后的稳定 ID。相同限定名的条件定义仍有不同 ID。
 
-Tree-sitter 使用字节位置。首期结构提取仅支持可严格解码的 UTF-8 Python 文件；非 UTF-8、二进制及不支持的语言列入 coverage，不错误地转换后复用原字节偏移。API 行号为 1-based 闭区间，字节范围为半开区间。CRLF 和非 ASCII 内容必须可逐字节回读。
+Tree-sitter 使用字节位置。结构提取支持可严格解码的 UTF-8 Python、TypeScript/JavaScript 和 Go 文件；非 UTF-8、二进制及不支持的语言列入 coverage，不错误地转换后复用原字节偏移。API 行号为 1-based 闭区间，字节范围为半开区间。CRLF 和非 ASCII 内容必须可逐字节回读。
 
 源码按内容摘要保存在私有缓存。只允许 generation manifest 中的文件通过查询返回。发布后的 SQLite 与源码对象不可变，不硬链接可被用户编辑的工作区文件。
 
 ## 3. 结构提取和跨文件解析
+
+语言注册表集中管理扩展名、安装包、grammar 版本、测试文件约定和提取规则版本。工作进程按语言/TSX 方言惰性加载解析器，输出统一的节点、作用域、引用和诊断；Python 沿用原有解析规则，JS/TS 与 Go 各自解析模块及包关系，然后合并到同一图。解析器和 resolver 的版本进入 fingerprint；单文件提取缓存只依赖其自身语言规则，规则升级后旧索引须同步。
+
+JS/TS 解析相对 ESM 导入与具名/默认导出，无法唯一定位模块时保留候选。Go 从捕获的 `go.mod` 获取当前模块身份，在同一包或同一模块的显式导入中解析函数，构建标签和平台文件不作运行环境选择。跨语言仅共享检索，不由同名符号推断调用。新增语言需提供提取和关系规则、注册 grammar，并补充行为回归；SQLite、引用校验、预算与 PreparedContext 组装无需另建一套。
 
 第一遍记录文件、类、函数、方法、嵌套定义、签名、装饰器、继承表达式、import 和调用/引用点。第二遍建立内存模块索引并解析引用，顺序固定：词法局部绑定 → 显式 import/alias → 相对导入 → 仓库内模块导出。`src` layout 由 `source_roots` 解决；namespace package 或多 root 同名模块有歧义时返回候选，不执行 Python 导入来猜答案。
 
@@ -398,7 +402,8 @@ A/B 固定相同 scope、文件 manifest、操作 schema、工具说明、输出
 | M1：核心图与更新 | callers/callees/impact/affected_tests、增量提取、全图解析、changes、原子发布 | 关系与新鲜度验收通过；4 个 pilot 可以完整运行 |
 | M2：受控 A/B | 统一评测 runner、A/B/C 144 次、原始证据和统计报告 | 质量与价值结论明确，或明确指出样本不足/能力缺口 |
 | M3：产品接入 | Runtime/Client/HTTP、PowerContext MCP 包装、可选 include_code、宿主验收 | B0/B1 验证、公开契约和跨后端历史上下文回归通过 |
-| 后续 | TS/JS、选择性关系失效、watcher、可选语义层 | 各自独立验收，不阻塞 Python 试验 |
+| 多语言 | Python、TS/JS/TSX/JSX、Go 共用索引、查询与 prepare | 混合仓库的证据、关系和增量行为回归 |
+| 后续 | 选择性关系失效、watcher、可选语义层 | 各自独立验收 |
 
 M0/M1 可直接通过本地 CLI 使用，不要求先完成远程接口、业务数据库 schema 或全部语言。实现公共 HTTP 契约时先修改 `openapi/powercontext.yaml`，运行 `make api-generate` 与 `make contract-test`；禁止手改生成文件。
 
@@ -444,10 +449,10 @@ CodeGraph 依据：[公开引擎入口](https://github.com/colbymchenry/codegrap
 
 # Unresolved questions
 
-- 第二种语言优先 TS/JS 还是 Go？由实际任务分布决定，不能让后续语言需求阻塞 Python 验证。
+- 首批语言之外的 grammar 和语义规则如何验收？按真实任务分布选择，并保留独立的语言回归。
 - 是否有必须部署多副本或远程代码 worker 的用户？该需求将改变源码分发与权限模型，需要单独设计，不能将本地缓存目录直接挂载为共享服务。
 
-本文已决定首期本地 Python、Tree-sitter、SQLite、无 LLM 前置依赖、增量提取加全图解析和按需查询；上述问题不妨碍开始实现最小闭环。
+本文已决定本地混合语言仓库、Tree-sitter、SQLite、无 LLM 前置依赖、增量提取加全图解析和按需查询；上述问题不妨碍开始实现最小闭环。
 
 # Future possibilities
 

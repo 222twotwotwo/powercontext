@@ -19,11 +19,12 @@ from typing import TYPE_CHECKING, Any
 
 from powercontext.builtin.code.capture import digest_bytes, json_bytes
 from powercontext.builtin.code.errors import CodeError
+from powercontext.builtin.code.languages import LANGUAGES, parser_builds, parser_for
 
 if TYPE_CHECKING:
     from tree_sitter import Node
 
-PARSER_BUILD = "tree-sitter-0.26.0/python-0.25.0/extract-5"
+PARSER_BUILD = LANGUAGES["python"].build
 FACTS_SCHEMA = 1
 _DOTTED_NAME = re.compile(r"^[A-Za-z_\w]+(?:\.[A-Za-z_\w]+)*$", re.UNICODE)
 
@@ -49,12 +50,12 @@ def file_node(path: str, content: bytes, language: str) -> dict[str, Any]:
         "file_sha256": digest_bytes(content),
         "signature": "",
         "docstring": "",
-        "parse_status": "ok" if language == "python" else "unsupported",
+        "parse_status": "ok" if language in LANGUAGES else "unsupported",
     }
 
 
 def extraction_key(path: str, sha256: str, language: str) -> str:
-    return digest_bytes(json_bytes([path, sha256, language, PARSER_BUILD, FACTS_SCHEMA]))
+    return digest_bytes(json_bytes([path, sha256, language, parser_builds()[language], FACTS_SCHEMA]))
 
 
 def _literal_string(node: Node | None, content: bytes) -> str | None:
@@ -71,12 +72,7 @@ class PythonExtractor:
     """Extract syntax without importing or evaluating repository modules."""
 
     def __init__(self) -> None:
-        try:
-            import tree_sitter_python
-            from tree_sitter import Language, Parser
-        except ImportError as error:
-            raise CodeError("code_parser_unavailable") from error
-        self.parser = Parser(Language(tree_sitter_python.language()))
+        self.parser = parser_for("python")
 
     def extract(self, path: str, content: bytes, *, timeout: float = 5) -> dict[str, Any]:
         deadline = time.monotonic() + timeout
@@ -414,7 +410,7 @@ def text_facts(path: str, content: bytes) -> dict[str, Any]:
         node["docstring"] = "\n".join(line for line in content.decode().splitlines() if line.startswith("#"))[:4096]
     return {
         "schema": FACTS_SCHEMA,
-        "parser_build": PARSER_BUILD,
+        "parser_build": parser_builds()["text"],
         "path": path,
         "file_sha256": node["file_sha256"],
         "nodes": [node],
@@ -422,5 +418,8 @@ def text_facts(path: str, content: bytes) -> dict[str, Any]:
         "bindings": [],
         "attribute_writes": [],
         "exports": None,
+        "go_module": next(iter(re.findall(r"^module\s+([^\s]+)", content.decode(), re.MULTILINE)), "").strip('"')
+        if path.rsplit("/", 1)[-1] == "go.mod"
+        else "",
         "errors": [],
     }

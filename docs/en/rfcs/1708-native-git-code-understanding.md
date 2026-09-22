@@ -26,7 +26,7 @@ Add no tables to the business database. The code cache contains only two ordinar
 `code_edges`, and one full-text virtual table, `code_search_fts`. File inventories, build metadata, and per-file raw
 extraction facts live in cache files published atomically with the index.
 
-The explicit Python repository loop is implemented: **index → locate → expand relationships → read evidence → edit
+The explicit mixed Python, TypeScript/JavaScript, and Go repository loop is implemented: **index → locate → expand relationships → read evidence → edit
 → sync → inspect impact and tests**. CLI, Runtime, Client, HTTP/MCP, optional PreparedContext, and Codex/Claude Code
 hooks are integrated and disabled by default. See the [repository code workflow](../docs/workflows/repository-code.md)
 for setup and use. Compare the CodeGraph core engine with the native engine, with ordinary search/read as an additional
@@ -124,7 +124,7 @@ implicitly build a whole repository. A host may trigger local sync after editing
 
 | Capability | Initial acceptance scope | Excluded guarantee |
 | --- | --- | --- |
-| Repository map | Directories, Python files, signatures, imports, test entry hints | Automatic business architecture explanation |
+| Repository map | Directories, multi-language files, signatures, imports, test entry hints | Automatic business architecture explanation |
 | Symbol search | Names, qualified names, paths, signatures, docstrings, README headings | Reliable English-code retrieval for every purely Chinese query |
 | Call relationships | Lexical scope, explicit imports/aliases, relative imports, explainable receiver hints | Complete runtime call graph or dynamic type proof |
 | Impact | Bounded reverse call, import, inheritance, and reference paths | Complete data flow, side effects, or safety proof |
@@ -132,7 +132,8 @@ implicitly build a whole repository. A host may trigger local sync after editing
 | Updates | Add, modify, delete, rename, branch switch, worktree edits | Distributed builds or an initial real-time watcher |
 | Other languages | File tree and bounded text reads, with unsupported capabilities declared | Treating an empty graph as language support |
 
-TypeScript/JavaScript is a candidate for a second stage and requires its own language acceptance and task evaluation.
+Python, TypeScript/JavaScript (including TSX/JSX), and Go can coexist in one index. See the
+[language coverage](../docs/workflows/repository-code.md#language-coverage) for extensions and static resolution boundaries.
 Non-code documents help navigation without creating call edges. Initially there is no remote cloning, dependency
 download, repository execution, or cross-repository graph.
 
@@ -172,16 +173,16 @@ A suggested implementation lives in `src/powercontext/builtin/code/`, with `capt
 | --- | --- |
 | CodeService | Scope/binding checks, index lifecycle, shared deadline, generation pinning |
 | RepositoryCapture | Git inventory, filtering, safe reads, manifest and content digests |
-| PythonExtractor | Declarations, scopes, references, call sites, and parse errors from supplied bytes |
-| PythonResolver | Modules, imports, name bindings, resolution evidence, unresolved/ambiguous references |
+| Language extractors | Declarations, scopes, references, call sites, and parse errors from supplied bytes |
+| Language resolvers | Modules, imports, name bindings, resolution evidence, unresolved/ambiguous references |
 | GraphStore | Three logical node/edge/FTS tables and companion cache files, atomic publication, reader lifetime |
 | CodeQueryEngine | Map, search, exploration, traversal, impact, and test candidates |
 | CodeEvidenceRenderer | Citation integrity, deduplication, range clipping, bounded output |
 
-Use pinned Python Tree-sitter bindings and a Python grammar through an optional `code` extra, recorded in `uv.lock`.
+Use pinned Python Tree-sitter bindings and Python, JavaScript, TypeScript/TSX, and Go grammars through an optional `code` extra, recorded in `uv.lock`.
 Do not depend on CodeGraph parsers, npm runtime, or private node structures. Run parsing in resource-limited workers
 so pathological files cannot block the service event loop. Packaging acceptance covers supported Python versions
-and wheel/sdist installations. A missing parser makes the capability unavailable; production startup does not
+and wheel/sdist installations. A missing parser is reported as an extraction failure; production startup does not
 download a grammar on demand.
 
 The standard SQLite/FTS5 cache is independent of the Memory database abstraction. Whether PowerContext uses SQLite,
@@ -255,7 +256,7 @@ only if measurements establish file aggregation as a bottleneck.
 Symbol IDs use path, kind, lexical qualified name, and declaration byte position, always qualified by fingerprint.
 IDs need not survive moves or renames; conditional definitions with equal names remain distinct.
 
-Tree-sitter positions are byte-based. Initially, structural extraction supports strictly decodable UTF-8 Python files.
+Tree-sitter positions are byte-based. Structural extraction supports strictly decodable UTF-8 Python, TypeScript/JavaScript, and Go files.
 Non-UTF-8, binary, and unsupported files appear in coverage; do not reuse raw offsets after lossy transcoding. Public
 line ranges are one-based and inclusive; byte ranges are half-open. CRLF and non-ASCII snippets must round-trip exactly.
 
@@ -263,6 +264,19 @@ Store source by digest in a private cache. Only files in the selected manifest m
 and source objects are immutable; never hard-link mutable worktree files as captured evidence.
 
 ## 3. Extraction and cross-file resolution
+
+A language registry owns extensions, installed grammar packages and versions, test naming, and extractor versions.
+Workers lazily load parsers by language and TSX dialect, emitting shared node, scope, reference, and diagnostic facts.
+Python retains its existing resolver; JS/TS and Go resolve modules and packages separately before merging into the
+same graph. Grammar and resolver versions participate in the fingerprint, while each extraction cache key includes
+only its language's parser rules. Rule upgrades require synchronization before using an old index.
+
+JS/TS follows relative ESM imports and named/default exports, retaining candidates for ambiguous modules. Go obtains
+module identity from captured `go.mod` files, resolving functions within a package or explicit imports inside the same
+module. Build constraints do not select the host platform. Shared search never turns identical names into cross-language
+calls. Adding a language requires grammar registration, extraction/resolution rules, and behavior regressions; it reuses
+SQLite storage, citation checks, budgets, and PreparedContext assembly.
+
 
 The first pass extracts files, classes, functions, methods, nested definitions, signatures, decorators, base-class
 expressions, imports, and call/reference sites. The second builds an in-memory module index and resolves in a fixed order:
@@ -606,7 +620,8 @@ layer, changing one factor at a time.
 | M1: graph and updates | callers/callees/impact/affected_tests, incremental extraction, global resolution, changes, atomic publication | Relationship/freshness acceptance and four complete pilots |
 | M2: controlled A/B | Common runner, 144 A/B/C runs, raw evidence, statistical report | Supported quality/value conclusion or explicit evidence/capability gap |
 | M3: product integration | Runtime/Client/HTTP, PowerContext MCP wrapper, optional include_code, host acceptance | B0/B1 evaluation, public contracts, cross-backend historical-context regression |
-| Later | TS/JS, selective invalidation, watcher, optional semantics | Independent acceptance without blocking Python evaluation |
+| Multi-language | Python, TS/JS/TSX/JSX and Go share index, queries and prepare | Mixed-repository evidence, relationship and incremental regressions |
+| Later | Selective invalidation, watcher, optional semantics | Independent acceptance |
 
 M0/M1 are usable locally without remote interfaces, business database schema changes, or all languages. Public HTTP
 implementation starts in `openapi/powercontext.yaml`, followed by `make api-generate` and `make contract-test`; never
@@ -667,11 +682,11 @@ incremental maintenance internally. Engine validation precedes automatic prepare
 
 # Unresolved questions
 
-- Should the second language be TS/JS or Go? Decide from real task distribution without blocking Python validation.
+- How should further grammars and semantic rules be accepted? Use real task distribution and independent language regressions.
 - Are multi-replica services or remote code workers required? They change source distribution and authorization and
   need a separate design, not a shared mount of a local cache.
 
-Initial local Python, Tree-sitter, SQLite, no required LLM, incremental extraction with global resolution, and on-demand
+Local mixed-language repositories, Tree-sitter, SQLite, no required LLM, incremental extraction with global resolution, and on-demand
 queries are decided here. These remaining questions do not block the minimum loop.
 
 # Future possibilities

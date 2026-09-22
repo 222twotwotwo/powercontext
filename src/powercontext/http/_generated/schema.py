@@ -7750,7 +7750,11 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                     "freshness": {"type": "string", "enum": ["fresh", "stale", "unknown"], "default": "unknown"},
                     "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$", "nullable": True},
                     "engine": {"type": "string", "default": "powercontext-native-v1"},
-                    "languages": {"items": {"type": "string"}, "type": "array", "default": ["python"]},
+                    "languages": {
+                        "items": {"type": "string"},
+                        "type": "array",
+                        "default": ["python", "javascript", "typescript", "go"],
+                    },
                     "operations": {
                         "items": {"type": "string"},
                         "type": "array",

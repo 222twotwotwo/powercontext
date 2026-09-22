@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from powercontext.builtin.code.errors import CodeError
+from powercontext.builtin.code.languages import LANGUAGES, language_for_path
 from powercontext.builtin.code.models import CodeLimits, CodeRepositoryConfig, relative_path
 
 _EXCLUDED_DIRECTORIES = frozenset({
@@ -45,9 +46,9 @@ _EXCLUDED_DIRECTORIES = frozenset({
     ".tox",
 })
 _SECRET_PATTERNS = (".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*", "id_ed25519*", ".netrc", ".npmrc")
-_TEXT_SUFFIXES = frozenset({
-    ".py",
-    ".pyi",
+_TEXT_SUFFIXES = frozenset(
+    extension for language in LANGUAGES.values() for extension in language.extensions
+) | frozenset({
     ".md",
     ".rst",
     ".txt",
@@ -57,11 +58,7 @@ _TEXT_SUFFIXES = frozenset({
     ".json",
     ".ini",
     ".cfg",
-    ".js",
-    ".jsx",
-    ".ts",
-    ".tsx",
-    ".go",
+    ".mod",
     ".rs",
     ".c",
     ".h",
@@ -370,7 +367,7 @@ def _capture_file(
     if reason:
         return CapturedFile(path, mode, reason=reason)
     content, reason, size, actual_mode = _read_relative(root_fd, path, limits.max_file_bytes, deadline)
-    language = "python" if Path(path).suffix in {".py", ".pyi"} else "text"
+    language = language_for_path(path)
     reason = reason or _content_reason(content)
     sha256 = digest_bytes(content) if content is not None and reason is None else None
     if content_dir is not None and content is not None and sha256 is not None:

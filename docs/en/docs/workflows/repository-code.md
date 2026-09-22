@@ -1,6 +1,6 @@
 ---
 title: Understand the current Git repository
-description: Index a local Python worktree, locate definitions, inspect relationships, and refresh evidence after edits.
+description: Index a local mixed-language Git worktree, locate definitions, inspect relationships, and refresh evidence after edits.
 ---
 
 # Understand the current Git repository
@@ -9,12 +9,36 @@ Memory retains past decisions and constraints. Code queries provide definitions,
 from the current worktree. Together they help an Agent connect the reasons behind a decision with its present implementation.
 The index is a rebuildable local cache. Functions do not become Memory, Source, or Artifact records, and no business database tables are added.
 
-The capability is disabled by default. Structural analysis supports UTF-8 Python through Tree-sitter and conservative
+The capability is disabled by default. Structural analysis supports UTF-8 Python, TypeScript/JavaScript (including TSX/JSX), and Go through Tree-sitter and conservative
 repository reference resolution. It requires no generation model, embeddings, Node.js, or CodeGraph service.
 Dynamic dispatch, reflection, framework-generated calls, and unsupported syntax can remain unknown.
 A `candidate` relationship is a lead, not proof of a runtime call.
 Local indexing is verified on Linux and requires POSIX file locks, process resource limits, and SQLite FTS5.
 Clients on other systems can use the HTTP service; local indexing on macOS and Windows has not been validated.
+
+## Language coverage
+
+One Scope can bind a repository containing Python, TypeScript/JavaScript, and Go together, using one index.
+File extensions select the grammar: JSX uses the JavaScript grammar, while TSX uses its own grammar.
+
+| Language | Files | Structure and static relationships |
+| --- | --- | --- |
+| Python | `.py`, `.pyi` | Classes, functions, methods, lexical scope, explicit imports/aliases, relative imports, and static re-exports |
+| JavaScript / TypeScript | `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.mts`, `.cts` | Functions, arrow functions, classes and methods; TS interfaces, types and enums; relative ESM imports, named/default exports, aliases and named re-exports |
+| Go | `.go`, module identity from `go.mod` | Functions, methods, structs, interfaces and types; cross-file calls within a package and explicit package imports/aliases within the current module |
+
+All languages share source hashes, index generations, query budgets, and `prepare_context`. Evidence includes
+`language`; `coverage.languages` reports per-language `ok`, `partial`, and `failed` file counts. Discovery alone does
+not imply successful structural extraction. JS/TS `.test`, `.spec`, and `__tests__` files and Go `_test.go` files
+participate in test discovery; filename matches always remain `candidate` results.
+
+JS/TS resolution excludes CommonJS module relationships, package exports maps, tsconfig path aliases, wildcard
+re-exports, inheritance dispatch, and type inference. Go does not execute the toolchain or resolve workspace/replace
+dependencies, interface dispatch, or receiver types. Files with Go build constraints remain searchable, but their
+relationships become candidates without selecting the current machine's build target. Dynamic receivers, parameter
+shadowing, and non-unique bindings cannot establish definite calls; candidate/unresolved reasons remain in index
+diagnostics. Mixed-language search does not infer HTTP, RPC, or FFI calls between Python, JS/TS, and Go.
+Other eligible text files retain file navigation and source reads.
 
 ## Configure and build
 
@@ -30,7 +54,7 @@ POWERCONTEXT_SERVER_CODE='{"enabled":true,"cache_dir":"/srv/powercontext/code-ca
 
 Keep the cache outside the repository. By default, capture includes tracked files and excludes common credential filenames, symlinks,
 binary files, and build output. Add `"include_untracked": true` to the binding to include untracked files while respecting
-Git ignore rules. `exclude` accepts repository-relative globs. `source_roots` affects import resolution without widening file access.
+Git ignore rules. `exclude` accepts repository-relative globs. `source_roots` affects Python import resolution without widening file access.
 
 ```bash
 powercontext code index --scope scp_demo --env-file /srv/powercontext/server.env
