@@ -529,14 +529,13 @@ Pin actual model ID, reasoning settings, host version, prompt, context/time/cost
 and randomize A/B/C order within tasks with a saved seed. Do not force graph-first use, disable ordinary Read/Grep, or
 give one arm extra guidance. Adoption is an outcome. Match warmup and cache policy; report cold starts separately.
 
-The repository includes a reproducible runner under `evaluation/native_code`. Its current protocol fixes
-`qwen3.7-plus`, temperature 0.2, provider-default reasoning, 24 rounds and a 480-second investigation budget per task.
-Aggregate admission budgets are 320,000 prompt tokens and 20,000 completion tokens, with a reserved final-answer turn.
+Maintain the evaluation runner independently of product runtime dependencies. Before execution, freeze model settings,
+per-task rounds, time limits and token budgets, with a reserved final-answer turn.
 An in-flight response can cross an admission threshold; actual usage remains in the record. A seeded Latin rotation
 places each arm in each execution position once across three repetitions. Protocol files retain model settings,
 prompts, cases, criteria, and native/CodeGraph source hashes. Evaluation cost records do not enter the business database.
 
-The protocol runs two triples concurrently; higher local concurrency exceeded the five-second query deadline in probes.
+Determine concurrency through resource and query-deadline probes before formal execution, and keep it equal across arms.
 Before each A/B Agent starts, a known-symbol query must return nonempty source evidence. Its cost belongs to setup and
 the probe result is withheld from the model. Verify adapter paths, hashes, ranges and relationship queries first.
 An adapter that drops all results invalidates its comparison cohort; preserve the records and costs separately.
