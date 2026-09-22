@@ -3093,29 +3093,38 @@
     },
     "evidence_root": "/data/codex-tmp/native-code-same-harness-20260922",
     "publication_delivery": {
-      "scope": "Typed cross-snapshot imports, direct/package import support, module-loader guards and JSON formatting; no model reruns or engine changes.",
+      "scope": "Typed cross-snapshot imports, direct/package import support, module-loader guards, JSON formatting and complete license headers; no model reruns or executable native engine changes.",
       "files": {
-        "README.md": "10b09513a5e340acd4e62b8071714684d3cc88231ed8fbbedb9f3d246c1388f5",
-        "__init__.py": "a446b4a7aa6c812777cd2ffcd5fadd8b0b94abe4c7726fd1f24870246c41a829",
-        "adapter.py": "30bbeba9a8c5271aa3f281a10a1265324ce8e8459ed5abbbab5b6f3615ea39c2",
-        "audit.py": "057204d75c13b422e0f90c1264adf6628d2887b2e8e235bbb5ba0c408ef91194",
-        "diagnose.py": "838fd85367ebdb74a778a92bbc398be8d1e8ac40450277533d724f154fb7005a",
-        "engine.py": "02f4f037eca87c5a6e7927c89f39ce0870affdeb0f85f7447395cce538a32ffb",
-        "policy.py": "1398b685bd0088ca7f2823d109bd5635817e2bd70ab46df88190a680009a72f4",
-        "preflight.py": "5c002ed0f34ed2408ec05bdc385207c8c96f257448ce92a06db682621164f9c9",
+        "README.md": "e0d696e612d9682b76b5958df50197d3c95d8e87d5a3b1eacf98d006dafd2037",
+        "__init__.py": "029d052926f23fd4d39816aca382b67f3cc2b2dd79cd932505163f996127fea9",
+        "adapter.py": "3528e52ba02484b03e0eca53f9f0214360797d99a8ae8d99a486fe12a3cc5782",
+        "audit.py": "508c9cf6012e71c2fd6e851bc62cf2e5dc97e2fc8ba06479565709dceacf6e7a",
+        "diagnose.py": "d13f6bca4d218e723fae1481e51265b3d2995dee14124a779efdfd8a0e116da7",
+        "engine.py": "4209ccd7ee020cf95a688c5795d4dec9a79947af48f3138125fec69e134ed87e",
+        "policy.py": "cb8fd7c352ba89c49293065423c293ff0497bccd20ff81c9a426e90d50d08784",
+        "preflight.py": "78e226ed5569484481b3f10186645da129ae57d041b9f2df772a8f9248f4dcda",
         "protocol.json": "1c0403f3429bb3399014671ee50d0a90d77920bb36fedca7cae5d2740b4381e9",
-        "rescore.py": "cdc1057243f4640c5ce888ae366ebea86c0049d8fdf210a40ac96be0cce89b0a",
-        "run.py": "b55360384735b59d84f976c48f1243127f3b9e754e055eba15d457bc737cb99b",
-        "seal.py": "2e6a0c9165f076cecaeefcf5ec9e7cefef793c432e2558bf28f242a0c3a6982a",
-        "setup.py": "22f12973aaf2a901d60bb533795fc0a1dd07892895da7edc0cd7a4a3ba015319",
-        "worker.py": "c8c6e21c1ee18c11e699d3a414bf526221cd1afac0275afdd7872e75eba72065"
+        "rescore.py": "137ed8c55d622c42b67c710d85d2a1e417277d8b6faaf3e5764ef52f3065bd18",
+        "run.py": "7ece3f9e2e3271c6436eec6ba9407022413bf8a301b2afce33be7e0e8f12b78c",
+        "seal.py": "514e39f7d5d963f08119ef2d4d68fb367350f7bd84257bf2233f1791fd0c9fc1",
+        "setup.py": "a0e1b9f2afd2fe63f8026b54bf27bcf35a4197b0c6164c48b311ebd1b0139332",
+        "worker.py": "3cb9aa6ef5fd14956009244bbcda49e7f7fc058e997e30a0af7fc52af095d6c1"
       },
       "validation": {
         "policy_cases": 13,
         "scorer_fixtures": 12,
         "identical_offline_grades": 18,
         "loader_registration": true
-      }
+      },
+      "native_header_changes": [
+        {
+          "file": "telemetry.py",
+          "kind": "license-header-only",
+          "python_ast_equal": true,
+          "executed_sha256": "db73353e334937067139099bd9066a2e4876c8d778457a12f906b932871c0f4f",
+          "published_sha256": "7ad9bbadbf36f7df4e1a3aec49463ad717ca4cb25ecc54c349f5f8de27538766"
+        }
+      ]
     }
   },
   "tasks": [

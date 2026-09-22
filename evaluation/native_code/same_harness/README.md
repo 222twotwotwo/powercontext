@@ -40,7 +40,10 @@ Use a fresh output directory. Install the frozen native wheel into an isolated
 Python 3.14 environment under `<output>/native-venv`, with the pinned parser and
 Pydantic dependencies. The performed installation uses a `.pth` dependency path
 to the existing worktree4 Python 3.14 site-packages; the installed native wheel
-takes precedence. `setup.py` verifies all 15 native module bytes and records
+takes precedence. For byte-identical September 22 replay, supply the native source
+from commit `fda17147c35058f7f4c495e68a820940d7635305` to `--native-source`;
+the published telemetry module has a license-header-only change.
+`setup.py` verifies all 15 native module bytes and records
 parser dependency hashes. Keep the same worktree5 Agent interpreter to preserve
 its PydanticAI dependency versions.
 
@@ -107,4 +110,5 @@ package imports and direct execution from a copied `bridge/` directory. Publicat
 validation replays all 13 policy fixtures, 12 scorer fixtures and 18 saved analysis
 answers. `provenance.delivery_files` identifies the original delivery snapshot;
 `provenance.publication_delivery` identifies the publication helpers. The executed
-bridge, native engine modules and recorded cohort results remain unchanged.
+bridge and recorded cohort results remain unchanged. Native executable Python ASTs
+are unchanged; the telemetry license header is recorded separately in provenance.

@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.12, <4.0"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -1674,11 +1674,13 @@ requires-dist = [
     { name = "sqlite-vec", marker = "extra == 'builtin'", specifier = ">=0.1.9,<0.2" },
     { name = "sqlite-vec", marker = "extra == 'seekdb'", specifier = ">=0.1.9,<0.2" },
     { name = "sqlite-vec", marker = "extra == 'server'", specifier = ">=0.1.9,<0.2" },
+    { name = "tree-sitter", marker = "extra == 'code'", specifier = "==0.26.0" },
+    { name = "tree-sitter-python", marker = "extra == 'code'", specifier = "==0.25.0" },
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.16,<1" },
     { name = "typing-extensions", specifier = ">=4.12,<5" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.34,<1" },
 ]
-provides-extras = ["builtin", "cli", "client", "seekdb", "server", "tracing-otlp"]
+provides-extras = ["builtin", "cli", "client", "code", "seekdb", "server", "tracing-otlp"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1687,6 +1689,7 @@ dev = [
     { name = "langchain-core", specifier = ">=1,<2" },
     { name = "langgraph", specifier = ">=1.2,<2" },
     { name = "powercontext", extras = ["cli", "server"] },
+    { name = "powercontext", extras = ["code"] },
     { name = "powercontext-langchain", editable = "../../integrations/langchain" },
     { name = "powercontext-langgraph", editable = "../../integrations/langgraph" },
     { name = "prek", specifier = ">=0.2.0" },
