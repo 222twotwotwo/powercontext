@@ -151,7 +151,7 @@ OFF 和 CodeGraph 对照均重新运行。worktree5 原报告的 10/12、10/12�
 
 ## 证据与交付
 
-可移植汇总为 `evaluation/native_code/results/2026-09-22-same-harness.json`，实验适配器与复现说明位于 `evaluation/native_code/same_harness/`。本机完整证据根目录为 `/data/codex-tmp/native-code-same-harness-20260922/`。
+汇总结果在本机保存于 `.venv/evaluation/native_code/results/2026-09-22-same-harness.json`，不纳入版本控制；实验适配器与复现说明位于 `evaluation/native_code/same_harness/`。本机完整证据根目录为 `/data/codex-tmp/native-code-same-harness-20260922/`。
 
 | 文件 | 内容 |
 | --- | --- |

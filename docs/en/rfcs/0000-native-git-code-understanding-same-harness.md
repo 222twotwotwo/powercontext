@@ -151,7 +151,7 @@ The earlier native repair result of 0/23 under another historical-task protocol 
 
 ## Evidence and delivery
 
-Portable results are in `evaluation/native_code/results/2026-09-22-same-harness.json`; adapters and reproduction instructions are in `evaluation/native_code/same_harness/`. Full local evidence is under `/data/codex-tmp/native-code-same-harness-20260922/`.
+The local result snapshot is `.venv/evaluation/native_code/results/2026-09-22-same-harness.json`, outside version control; adapters and reproduction instructions are in `evaluation/native_code/same_harness/`. Full local evidence is under `/data/codex-tmp/native-code-same-harness-20260922/`.
 
 | File | Contents |
 | --- | --- |

@@ -31,6 +31,8 @@ evaluation/web/node_modules/
 evaluation/web/playwright-report/
 evaluation/web/test-results/
 evaluation/web/*.tsbuildinfo
+# Local native-code evaluation outputs.
+/evaluation/native_code/results/
 downloads/
 eggs/
 .eggs/

@@ -2,6 +2,8 @@
 
 This opt-in harness compares the actual CodeGraph library (A), PowerContext's native Python engine (B), and bounded ordinary file tools (C). It is not a product dependency. CodeGraph is called through a local Node process, without MCP. All arms receive the same historical source snapshot, ordinary tools, task prompt, output budget, and model configuration.
 
+Keep generated results, conversations, logs and caches outside version control. Local aggregate snapshots are stored under `.venv/evaluation/native_code/results/`; `evaluation/native_code/results/` is also ignored to prevent accidental commits. The repository contains the evaluation code, task definitions, scoring criteria and written reports.
+
 The checked-in case catalog contains four independent protocol pilots and sixteen formal tasks: eight real historical repairs, four understanding tasks, and four impact tasks. Historical repair admission requires a failing baseline and a passing reference with the hidden regression suite. The reference and hidden tests remain outside model workspaces. Sub-agents, network access, Git history, and other checkouts are not exposed through tools. Repository test execution uses `bubblewrap`; unrestricted execution is not a fallback. Hidden grading restores trusted tests so model changes cannot suppress them.
 
 Prerequisites: a source development installation (`uv sync --extra code`), Git, Linux `bubblewrap`, a local CodeGraph checkout with its built library and installed grammars, Node compatible with that checkout, and an explicitly authorized model endpoint. The environment file supplies inference settings. No production database is used for engine A/B/C evaluation.

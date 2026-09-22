@@ -6,6 +6,9 @@ The 36-run cohort scores OFF 10/12, CodeGraph 11/12 and native 11/12. Native
 increases median paired time by 24.1% and input tokens by 34.4% against CodeGraph;
 equal pass totals do not establish noninferiority or an efficiency advantage.
 
+The local aggregate snapshot is `.venv/evaluation/native_code/results/2026-09-22-same-harness.json`.
+It is excluded from version control, as are generated run artifacts, logs and caches.
+
 This experiment replaces the engine below the frozen worktree5 optimized
 integration. It reuses the exact reference `agent_worker.py`, including its
 PydanticAI tools, prompts, model settings, preparation, limits, test execution and

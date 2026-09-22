@@ -107,7 +107,7 @@ description: 固定公开历史任务上的真实 CodeGraph、原生引擎和普
 
 ## 证据与使用判断
 
-协议、分任务统计和聚合结果位于 `evaluation/native_code/results/2026-09-21.json`。本机原始证据根目录为 `/data/codex-tmp/native-code-20260921/`，包含 `formal-2/`、`formal-2-review/`、`formal-2-summary.json` 和 `formal-2-audit.json`。`formal-2/frozen-source/` 保存与协议哈希一致的引擎和 runner 源文件；会话、原始引擎响应、源码清单、候选修改和隐藏验收日志均保留。
+协议、分任务统计和聚合结果在本机保存于 `.venv/evaluation/native_code/results/2026-09-21.json`，不纳入版本控制。本机原始证据根目录为 `/data/codex-tmp/native-code-20260921/`，包含 `formal-2/`、`formal-2-review/`、`formal-2-summary.json` 和 `formal-2-audit.json`。`formal-2/frozen-source/` 保存与协议哈希一致的引擎和 runner 源文件；会话、原始引擎响应、源码清单、候选修改和隐藏验收日志均保留。
 
 实验构建包含运维 tracing、缓存清理和路径边界计数。交付构建还在索引事务结束时显式关闭 SQLite 连接，以消除依赖垃圾回收的资源释放；提取、关系解析、排名和证据渲染规则不变。成绩与执行成本归属于协议归档构建，交付源码摘要单列于数据文件的 delivery_build，并经资源回归与安装包验收。原始证据保留在本机，可移植聚合数据不能替代独立查验。
 
