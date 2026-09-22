@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.12, <4.0"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -1675,7 +1675,10 @@ requires-dist = [
     { name = "sqlite-vec", marker = "extra == 'seekdb'", specifier = ">=0.1.9,<0.2" },
     { name = "sqlite-vec", marker = "extra == 'server'", specifier = ">=0.1.9,<0.2" },
     { name = "tree-sitter", marker = "extra == 'code'", specifier = "==0.26.0" },
+    { name = "tree-sitter-go", marker = "extra == 'code'", specifier = "==0.25.0" },
+    { name = "tree-sitter-javascript", marker = "extra == 'code'", specifier = "==0.25.0" },
     { name = "tree-sitter-python", marker = "extra == 'code'", specifier = "==0.25.0" },
+    { name = "tree-sitter-typescript", marker = "extra == 'code'", specifier = "==0.23.2" },
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.16,<1" },
     { name = "typing-extensions", specifier = ">=4.12,<5" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.34,<1" },
