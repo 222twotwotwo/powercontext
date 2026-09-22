@@ -32,6 +32,7 @@ from powercontext.builtin.code.capture import (
 )
 from powercontext.builtin.code.errors import CodeError
 from powercontext.builtin.code.extract import extraction_key
+from powercontext.builtin.code.graph import GraphStore
 from powercontext.builtin.code.languages import LANGUAGES, parser_builds
 from powercontext.builtin.code.models import (
     CodeConfig,
@@ -44,7 +45,7 @@ from powercontext.builtin.code.models import (
 from powercontext.builtin.code.process import extract_jobs
 from powercontext.builtin.code.query import GraphQuery
 from powercontext.builtin.code.resolve_polyglot import RESOLVER_BUILDS, resolve_facts
-from powercontext.builtin.code.store import SCHEMA_VERSION, create_graph, open_graph
+from powercontext.builtin.code.store import SCHEMA_VERSION, SQLiteGraphStore
 from powercontext.builtin.code.telemetry import observed, stage
 
 
@@ -55,8 +56,9 @@ def _now() -> str:
 class CodeService:
     """Own a local rebuildable index; callers must authorize the selected Scope."""
 
-    def __init__(self, config: CodeConfig) -> None:
+    def __init__(self, config: CodeConfig, *, store: GraphStore | None = None) -> None:
         self.config = config
+        self.store = store if store is not None else SQLiteGraphStore()
 
     def _binding(self, scope_id: str) -> tuple[CodeRepositoryConfig, GenerationCache, str]:
         if not self.config.enabled:
@@ -69,7 +71,9 @@ class CodeService:
         if cache_root == root or root in cache_root.parents:
             raise CodeError("code_cache_inside_repository", status=422)
         identity = digest_bytes(json_bytes([scope_id, str(root), repository.model_dump(mode="json")]))
-        cache = GenerationCache(cache_root / identity)
+        if self.store.identity != "sqlite":
+            identity = digest_bytes(json_bytes([identity, self.store.identity]))
+        cache = GenerationCache(cache_root / identity, self.store)
         return repository, cache, identity
 
     @observed("index")
@@ -84,6 +88,7 @@ class CodeService:
             # A previous interrupted builder cannot retain an active generation here.
             for abandoned in cache.directory.glob("staging-*"):
                 if abandoned.is_dir() and not abandoned.is_symlink():
+                    self.store.remove(abandoned, deadline)
                     shutil.rmtree(abandoned)
             try:
                 result = self._build(repository, cache, binding, deadline, full=full)
@@ -148,7 +153,7 @@ class CodeService:
                     attributes.update(edge_count=len(edges), diagnostic_count=sum(map(len, diagnostics.values())))
                 nodes = [node for fact in facts for node in fact["nodes"]]
                 with stage("store"):
-                    create_graph(staging / "graph.sqlite", nodes, edges, deadline)
+                    storage = self.store.create(staging, nodes, edges, deadline)
                 for path, issues in diagnostics.items():
                     key = entries[path]["extraction_key"]
                     content = json_bytes({"items": issues})
@@ -161,7 +166,7 @@ class CodeService:
                         continue
                     raise CodeError("workspace_busy", status=409)
                 manifest = self._manifest(binding, captured, fingerprint, entries, facts, edges, diagnostics)
-                manifest["database_sha256"] = hash_file(staging / "graph.sqlite", deadline)
+                manifest.update(storage)
                 manifest["previous_fingerprint"] = previous.fingerprint if previous else None
                 with stage("publish") as attributes:
                     generation = cache.publish(staging, manifest, deadline, self.config.limits.max_cache_bytes)
@@ -174,6 +179,7 @@ class CodeService:
                 }
             finally:
                 if staging.exists():
+                    self.store.remove(staging, time.monotonic() + self.config.limits.query_seconds)
                     shutil.rmtree(staging)
         raise CodeError("workspace_busy", status=409)
 
@@ -451,7 +457,7 @@ class CodeService:
             paths = tuple(path for path in operation.paths if path in files)
             if not paths:
                 continue
-            with open_graph(graph.generation.directory / "graph.sqlite", graph.deadline) as connection:
+            with graph.generation.graph(graph.deadline) as connection:
                 seeds = graph.path_seeds(connection, paths)
                 affected = graph.walk(
                     connection, seeds, operation.path_prefix, 5, reverse=True, impact=True, maximum=operation.limit

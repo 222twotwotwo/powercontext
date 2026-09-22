@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Annotated
@@ -18,6 +19,7 @@ from typing import Annotated
 import typer
 from pydantic import ValidationError
 
+from powercontext.builtin.code.configuration import open_code_service
 from powercontext.builtin.code.errors import CodeError
 from powercontext.builtin.code.models import CodeQueryRequest
 from powercontext.builtin.code.service import CodeService
@@ -37,16 +39,12 @@ def _read_request(path: Path | None) -> CodeQueryRequest:
 def _run(operation: str, scope_id: str, env_file: Path | None, request_file: Path | None = None) -> None:
     try:
         with server_settings_context(env_file=env_file) as settings:
-            service = CodeService(settings.code)
-            if operation in {"index", "sync"}:
-                result = service.index(scope_id, full=operation == "index")
-            elif operation == "clear":
-                result = service.clear(scope_id)
-            elif operation == "status":
-                result = service.status(scope_id).model_dump(mode="json", by_alias=True)
-            else:
-                request = _read_request(request_file)
-                result = service.query(scope_id, request).model_dump(mode="json", by_alias=True)
+
+            async def run():
+                async with open_code_service(settings.code, settings.database) as service:
+                    return await asyncio.to_thread(_execute, service, operation, scope_id, request_file)
+
+            result = asyncio.run(run())
     except CodeError as error:
         typer.echo(json.dumps({"error": {"code": error.code}}, ensure_ascii=False), err=True)
         raise typer.Exit(1) from None
@@ -54,6 +52,16 @@ def _run(operation: str, scope_id: str, env_file: Path | None, request_file: Pat
         typer.echo('{"error":{"code":"invalid_code_configuration_or_request"}}', err=True)
         raise typer.Exit(2) from None
     typer.echo(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+
+
+def _execute(service: CodeService, operation: str, scope_id: str, request_file: Path | None):
+    if operation in {"index", "sync"}:
+        return service.index(scope_id, full=operation == "index")
+    if operation == "clear":
+        return service.clear(scope_id)
+    if operation == "status":
+        return service.status(scope_id).model_dump(mode="json", by_alias=True)
+    return service.query(scope_id, _read_request(request_file)).model_dump(mode="json", by_alias=True)
 
 
 @app.command()

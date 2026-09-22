@@ -7,13 +7,14 @@ description: Index a local mixed-language Git worktree, locate definitions, insp
 
 Memory retains past decisions and constraints. Code queries provide definitions, relationships, and source evidence
 from the current worktree. Together they help an Agent connect the reasons behind a decision with its present implementation.
-The index is a rebuildable local cache. Functions do not become Memory, Source, or Artifact records, and no business database tables are added.
+The index is a rebuildable local cache. Functions do not become Memory, Source, or Artifact records.
+Embedded seekdb deployments store code graphs in dedicated tables in their local database; other deployments use a separate SQLite cache.
 
 The capability is disabled by default. Structural analysis supports UTF-8 Python, TypeScript/JavaScript (including TSX/JSX), and Go through Tree-sitter and conservative
 repository reference resolution. It requires no generation model, embeddings, Node.js, or CodeGraph service.
 Dynamic dispatch, reflection, framework-generated calls, and unsupported syntax can remain unknown.
 A `candidate` relationship is a lead, not proof of a runtime call.
-Local indexing is verified on Linux and requires POSIX file locks, process resource limits, and SQLite FTS5.
+Local indexing is verified on Linux and requires POSIX file locks, process resource limits, and SQLite FTS5 or embedded seekdb full-text search.
 Clients on other systems can use the HTTP service; local indexing on macOS and Windows has not been validated.
 
 ## Language coverage
@@ -51,6 +52,29 @@ Set this JSON in the Server environment file, replacing the Scope and absolute p
 ```dotenv
 POWERCONTEXT_SERVER_CODE='{"enabled":true,"cache_dir":"/srv/powercontext/code-cache","repositories":{"scp_demo":{"root":"/srv/git/project","source_roots":["src","."]}}}'
 ```
+
+For embedded seekdb, install `powercontext[server,cli,code,seekdb]` (or run `uv sync --extra code --extra seekdb`)
+and select the embedded database in the same environment file:
+
+```dotenv
+POWERCONTEXT_SERVER_DATABASE='{"kind":"seekdb","path":"/srv/powercontext/seekdb"}'
+```
+
+Code storage follows this database selection. seekdb uses `pc_code_generations`, `pc_code_nodes`, and
+`pc_code_edges`, with a native full-text index on node search text. Source snapshots, extraction facts, diagnostics,
+and the atomic current-version pointer remain under `cache_dir`. Keep both the database and cache on this host;
+sharing the database alone does not make the code index available to another service instance.
+
+The `seekdb` extra requires `pylibseekdb>=1.4.0.post1`. The CLI and Server can open the same embedded directory locally,
+so the commands below also work while the Server is running. Use the same environment file and cache path for both.
+Each operation releases its database connections before its embedded handle closes. Changing the backend or database
+path selects a separate cache binding; build a new index after changing either. Existing SQLite files are not migrated.
+
+New graph rows are committed before the local version pointer is published. Interrupted builds leave the previously
+published version available; sync retries and clear reclaim unreferenced versions after active readers finish.
+Checksums cover persisted graph content and local source evidence. Exact path and symbol matches take priority;
+full-text rankings can differ between SQLite and seekdb. The cache byte limit counts local files plus serialized
+seekdb graph rows; seekdb's engine files, transaction logs, indexes, and reserved disk space are additional storage.
 
 Keep the cache outside the repository. By default, capture includes tracked files and excludes common credential filenames, symlinks,
 binary files, and build output. Add `"include_untracked": true` to the binding to include untracked files while respecting

@@ -22,6 +22,7 @@ from typing import Any
 
 from powercontext.builtin.code.capture import check_deadline, json_bytes
 from powercontext.builtin.code.errors import CodeError
+from powercontext.builtin.code.graph import GraphReader
 
 SCHEMA_VERSION = 1
 _SCHEMA = """
@@ -149,3 +150,80 @@ def search_nodes(connection: sqlite3.Connection, query: str, prefix: str, limit:
             node = json.loads(row[0])
             results.setdefault(node["id"], node)
     return list(results.values())[:limit]
+
+
+class SQLiteGraphReader:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def node(self, node_id: str) -> dict[str, Any] | None:
+        return node_by_id(self.connection, node_id)
+
+    def search(self, query: str, prefix: str, limit: int) -> list[dict[str, Any]]:
+        return search_nodes(self.connection, query, prefix, limit)
+
+    def nodes(
+        self, *, prefix: str = "", path: str | None = None, kind: str | None = None, parent_id: str | None = None
+    ) -> Iterator[dict[str, Any]]:
+        clause, values = path_clause(prefix)
+        predicates, parameters = [clause], list(values)
+        for field, value in (("path", path), ("kind", kind), ("parent_id", parent_id)):
+            if value is not None:
+                predicates.append(f"{field} = ?")
+                parameters.append(value)
+        rows = self.connection.execute(
+            "SELECT payload FROM code_nodes WHERE " + " AND ".join(predicates) + " ORDER BY path, start_line",  # noqa: S608 - fixed predicates.
+            parameters,
+        )
+        return (json.loads(row[0]) for row in rows)
+
+    def neighbors(
+        self, node_id: str, prefix: str, *, reverse: bool, impact: bool, count_boundary: bool
+    ) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], int]:
+        current, other = ("target_id", "source_id") if reverse else ("source_id", "target_id")
+        clause, parameters = path_clause(prefix, column="n.path")
+        kinds = "e.kind != 'contains'" if impact else "e.kind = 'calls'"
+        join = f"FROM code_edges e JOIN code_nodes n ON n.id = e.{other} WHERE e.{current} = ? AND {kinds}"
+        boundary = 0
+        if count_boundary:
+            boundary = self.connection.execute(
+                f"SELECT COUNT(*) {join} AND NOT ({clause})", (node_id, *parameters)
+            ).fetchone()[0]
+        rows = self.connection.execute(
+            f"SELECT e.payload, n.payload {join} AND {clause} ORDER BY n.path, n.start_line LIMIT 1001",
+            (node_id, *parameters),
+        )
+        return [(json.loads(row[0]), json.loads(row[1])) for row in rows], boundary
+
+
+class SQLiteGraphStore:
+    identity = "sqlite"
+
+    def create(
+        self, directory: Path, nodes: list[dict[str, Any]], edges: list[dict[str, Any]], deadline: float
+    ) -> dict[str, Any]:
+        from powercontext.builtin.code.cache import hash_file
+
+        path = directory / "graph.sqlite"
+        create_graph(path, nodes, edges, deadline)
+        return {"database_sha256": hash_file(path, deadline)}
+
+    def verify(self, directory: Path, manifest: dict[str, Any], deadline: float) -> None:
+        from powercontext.builtin.code.cache import hash_file
+
+        if hash_file(directory / "graph.sqlite", deadline) != manifest.get("database_sha256"):
+            raise CodeError("index_integrity_failed")
+
+    @contextmanager
+    def open(self, directory: Path, manifest: dict[str, Any], deadline: float) -> Iterator[GraphReader]:
+        del manifest
+        with open_graph(directory / "graph.sqlite", deadline) as connection:
+            yield SQLiteGraphReader(connection)
+
+    def remove(self, directory: Path, deadline: float) -> None:
+        # The cache removes the entire SQLite generation directory after readers exit.
+        del directory, deadline
+
+    def size(self, directory: Path, deadline: float) -> int:
+        del directory, deadline
+        return 0  # Already counted with the local generation files.

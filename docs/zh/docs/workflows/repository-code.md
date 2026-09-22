@@ -7,12 +7,13 @@ description: 为多语言 Git 工作区建立本地代码索引，定位定义�
 
 Memory 保存历史决策与约束；代码查询提供当前工作区的定义、关系和源码证据。
 两者组合时，Agent 可以同时回答“此前为什么这样设计”和“现在代码实际如何实现”。
-代码索引是可重建的本机缓存，不会把每个函数创建为 Memory、Source 或 Artifact，也不新增业务数据库表。
+代码索引是可重建的本机缓存，不会把每个函数创建为 Memory、Source 或 Artifact。
+嵌入式 seekdb 部署把代码图存入本地数据库的专用表；其他部署使用独立 SQLite 缓存。
 
 本能力默认关闭。结构分析支持 UTF-8 Python、TypeScript/JavaScript（含 TSX/JSX）和 Go，使用 Tree-sitter 提取语法，再保守地解析仓库内引用。
 它不需要生成模型、Embedding、Node.js 或 CodeGraph 服务。动态分派、反射、框架隐含调用及不支持的语法可能缺失；
 `candidate` 关系只表示线索，不能当作运行时调用证明。
-本机索引目前在 Linux 验证，依赖 POSIX 文件锁、进程资源限制和 SQLite FTS5；其他系统可通过 HTTP 使用该服务。
+本机索引目前在 Linux 验证，依赖 POSIX 文件锁、进程资源限制，以及 SQLite FTS5 或嵌入式 seekdb 全文检索；其他系统可通过 HTTP 使用该服务。
 macOS 和 Windows 的本机索引尚未验收。
 
 ## 多语言范围
@@ -48,6 +49,26 @@ Go 条件编译文件仍可检索，其相关关系降为候选，不按当前�
 ```dotenv
 POWERCONTEXT_SERVER_CODE='{"enabled":true,"cache_dir":"/srv/powercontext/code-cache","repositories":{"scp_demo":{"root":"/srv/git/project","source_roots":["src","."]}}}'
 ```
+
+使用嵌入式 seekdb 时，安装 `powercontext[server,cli,code,seekdb]`，源码安装执行
+`uv sync --extra code --extra seekdb`，并在同一环境文件中选择数据库：
+
+```dotenv
+POWERCONTEXT_SERVER_DATABASE='{"kind":"seekdb","path":"/srv/powercontext/seekdb"}'
+```
+
+代码存储跟随这一配置。seekdb 使用 `pc_code_generations`、`pc_code_nodes`、`pc_code_edges` 三张专用表，
+在节点搜索字段上建立原生全文索引。源码快照、解析 facts、诊断及原子切换的当前版本指针仍保存在
+`cache_dir`。数据库与缓存需要位于同一主机；仅共享数据库不能让其他服务实例使用此代码索引。
+
+`seekdb` extra 要求 `pylibseekdb>=1.4.0.post1`。CLI 和 Server 可以在本机打开同一嵌入式数据库目录，
+因此服务运行期间也可以执行下述命令；两者必须使用相同的环境文件和缓存路径。操作先释放数据库连接，
+再关闭嵌入式句柄。切换后端或数据库路径会使用独立的缓存绑定，需要重新构建索引，不迁移已有 SQLite 文件。
+
+新版本的图数据提交成功后才发布本地版本指针。构建中断时保留此前发布的版本；重试 sync 或 clear 时，
+在活跃读者结束后回收无引用版本。持久化图内容和本地源码证据均做摘要校验。检索优先匹配精确路径和符号，
+全文排序可以因 SQLite 与 seekdb 后端而不同。缓存字节上限统计本地文件与 seekdb 图记录的序列化大小；
+引擎文件、事务日志、索引和预留磁盘空间属于额外存储开销。
 
 缓存必须位于仓库之外。默认只读取 Git 跟踪文件，并按文件名排除常见凭据文件，同时排除符号链接、二进制和构建产物。
 需要分析未跟踪文件时，在该绑定中设置 `"include_untracked": true`；Git ignore 规则仍然生效。

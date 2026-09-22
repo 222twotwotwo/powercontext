@@ -11,14 +11,13 @@
 
 from __future__ import annotations
 
-import json
-import sqlite3
 from collections import deque
 from typing import Any
 
 from powercontext.builtin.code.cache import Generation
 from powercontext.builtin.code.capture import check_deadline, digest_bytes, source_lines
 from powercontext.builtin.code.errors import CodeError
+from powercontext.builtin.code.graph import GraphReader
 from powercontext.builtin.code.languages import (
     LANGUAGE_LIMITATIONS,
     LANGUAGES,
@@ -34,7 +33,6 @@ from powercontext.builtin.code.models import (
     SearchOperation,
     TestsOperation,
 )
-from powercontext.builtin.code.store import node_by_id, open_graph, path_clause, search_nodes
 from powercontext.builtin.code.telemetry import observed, stage
 
 
@@ -112,7 +110,7 @@ class GraphQuery:
 
     def execute(self, request: CodeQueryRequest) -> list[dict[str, Any]]:
         operation = request.operation
-        with open_graph(self.generation.directory / "graph.sqlite", self.deadline) as connection:
+        with self.generation.graph(self.deadline) as connection:
             if isinstance(operation, ReadOperation):
                 record = self.generation.manifest["included_files"].get(operation.path)
                 if record is None:
@@ -125,7 +123,7 @@ class GraphQuery:
             if isinstance(operation, SearchOperation):
                 return self.search(connection, operation)
             if isinstance(operation, RelationOperation):
-                seed = node_by_id(connection, operation.symbol_id)
+                seed = connection.node(operation.symbol_id)
                 if seed is None or not within(seed["path"], operation.path_prefix):
                     raise CodeError("code_target_missing", status=422)
                 depth = operation.depth if operation.kind == "impact" else 1
@@ -153,9 +151,9 @@ class GraphQuery:
                 return self.test_hints(connection, operation, items)
         raise CodeError("unsupported_capability", status=501)
 
-    def search(self, connection: sqlite3.Connection, operation: SearchOperation) -> list[dict[str, Any]]:
+    def search(self, connection: GraphReader, operation: SearchOperation) -> list[dict[str, Any]]:
         with stage("search") as attributes:
-            nodes = search_nodes(connection, operation.query, operation.path_prefix, operation.limit + 1)
+            nodes = connection.search(operation.query, operation.path_prefix, operation.limit + 1)
             attributes["hit_count"] = len(nodes)
             attributes["hit_count_is_lower_bound"] = len(nodes) > operation.limit
         if len(nodes) > operation.limit:
@@ -174,17 +172,11 @@ class GraphQuery:
             self.limitations.add("item_limit")
         return list(items.values())[:16]
 
-    def map(self, connection: sqlite3.Connection, operation: MapOperation) -> list[dict[str, Any]]:
-        clause, parameters = path_clause(operation.path_prefix)
-        rows = connection.execute(
-            f"SELECT payload FROM code_nodes WHERE {clause} ORDER BY path, start_line",  # noqa: S608 - fixed SQL fragment.
-            parameters,
-        )
+    def map(self, connection: GraphReader, operation: MapOperation) -> list[dict[str, Any]]:
         items = []
         base = operation.path_prefix.count("/") + (1 if operation.path_prefix else 0)
-        for row in rows:
+        for node in connection.nodes(prefix=operation.path_prefix):
             check_deadline(self.deadline)
-            node = json.loads(row[0])
             if node["path"].count("/") - base >= operation.depth:
                 continue
             if len(items) >= operation.limit:
@@ -194,29 +186,23 @@ class GraphQuery:
             items.append(self.evidence(node, include_source=False))
         return items
 
-    def path_seeds(self, connection: sqlite3.Connection, paths: tuple[str, ...]) -> list[dict[str, Any]]:
+    def path_seeds(self, connection: GraphReader, paths: tuple[str, ...]) -> list[dict[str, Any]]:
         nodes = []
         for path in paths:
-            row = connection.execute(
-                "SELECT payload FROM code_nodes WHERE path = ? AND kind = 'file'", (path,)
-            ).fetchone()
-            if row is None:
+            node = next(connection.nodes(path=path, kind="file"), None)
+            if node is None:
                 raise CodeError("code_target_missing", status=422)
-            node = json.loads(row[0])
             if node["language"] not in LANGUAGES:
                 raise CodeError("unsupported_capability", status=501)
             nodes.append(node)
         return nodes
 
-    def seeds_with_members(self, connection: sqlite3.Connection, seeds: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def seeds_with_members(self, connection: GraphReader, seeds: list[dict[str, Any]]) -> list[dict[str, Any]]:
         result = {node["id"]: node for node in seeds}
         pending = deque(node for node in seeds if node["kind"] in {"file", "class"})
         while pending and len(result) < 500:
             parent = pending.popleft()
-            for row in connection.execute(
-                "SELECT payload FROM code_nodes WHERE parent_id = ? ORDER BY path, start_line", (parent["id"],)
-            ):
-                node = json.loads(row[0])
+            for node in connection.nodes(parent_id=parent["id"]):
                 if node["id"] not in result:
                     result[node["id"]] = node
                     pending.append(node)
@@ -229,7 +215,7 @@ class GraphQuery:
     @observed("traverse")
     def walk(
         self,
-        connection: sqlite3.Connection,
+        connection: GraphReader,
         seeds: list[dict[str, Any]],
         prefix: str,
         depth: int,
@@ -289,7 +275,7 @@ class GraphQuery:
     def enqueue_parent(self, connection, node, witness, distance, candidate, prefix, pending, visited) -> None:
         if node["parent_id"] is None:
             return
-        parent = node_by_id(connection, node["parent_id"])
+        parent = connection.node(node["parent_id"])
         if parent is None or (parent["id"], candidate) in visited or not within(parent["path"], prefix):
             return
         visited.add((parent["id"], candidate))
@@ -329,49 +315,35 @@ class GraphQuery:
 
     def neighbors(
         self,
-        connection: sqlite3.Connection,
+        connection: GraphReader,
         node_id: str,
         prefix: str,
         *,
         reverse: bool,
         impact: bool,
     ) -> list[tuple[dict[str, Any], dict[str, Any]]]:
-        current, other = ("target_id", "source_id") if reverse else ("source_id", "target_id")
-        clause, parameters = path_clause(prefix, column="n.path")
-        kinds = "e.kind != 'contains'" if impact else "e.kind = 'calls'"
         boundary_key = (node_id, reverse, impact)
-        if prefix and boundary_key not in self._counted_boundaries:
-            count = connection.execute(
-                f"SELECT COUNT(*) FROM code_edges e JOIN code_nodes n ON n.id = e.{other} "  # noqa: S608 - fixed columns and predicates.
-                f"WHERE e.{current} = ? AND {kinds} AND NOT ({clause})",
-                (node_id, *parameters),
-            ).fetchone()[0]
+        count_boundary = bool(prefix) and boundary_key not in self._counted_boundaries
+        neighbors, count = connection.neighbors(
+            node_id, prefix, reverse=reverse, impact=impact, count_boundary=count_boundary
+        )
+        if count_boundary:
             self._counted_boundaries.add(boundary_key)
             self.boundary_edges += count
             if count:
                 self.limitations.add("edges_outside_path_scope")
-        rows = connection.execute(
-            f"SELECT e.payload, n.payload FROM code_edges e JOIN code_nodes n ON n.id = e.{other} "  # noqa: S608 - fixed column names.
-            f"WHERE e.{current} = ? AND {kinds} AND {clause} ORDER BY n.path, n.start_line LIMIT 1001",
-            (node_id, *parameters),
-        )
-        return [(json.loads(row[0]), json.loads(row[1])) for row in rows]
+        return neighbors
 
     def test_hints(
-        self, connection: sqlite3.Connection, operation: TestsOperation, items: list[dict[str, Any]]
+        self, connection: GraphReader, operation: TestsOperation, items: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
         self.limitations.add("test_candidates_do_not_replace_required_tests")
         if len(items) >= operation.limit:
             return items
         stems = {(language_for_path(path), test_stem(path)) for path in operation.paths}
         existing = {item["path"] for item in items}
-        clause, parameters = path_clause(operation.path_prefix)
-        for row in connection.execute(
-            f"SELECT payload FROM code_nodes WHERE kind = 'file' AND {clause} ORDER BY path",  # noqa: S608 - fixed SQL fragment.
-            parameters,
-        ):
+        for node in connection.nodes(kind="file", prefix=operation.path_prefix):
             check_deadline(self.deadline)
-            node = json.loads(row[0])
             if (
                 node["path"] in existing
                 or not is_test(node)

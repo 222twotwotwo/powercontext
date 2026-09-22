@@ -16,15 +16,16 @@ description: Design native symbol indexing, cross-file relationships, incrementa
 # Summary
 
 Implement a native code understanding engine inside PowerContext. It reads an authorized local Git worktree, extracts
-symbols and references with Tree-sitter, resolves cross-file relationships statically, and uses a separate SQLite/FTS5
-cache for repository navigation, symbol search, callers/callees, change impact, test candidates, and cited source reads.
+symbols and references with Tree-sitter, resolves cross-file relationships statically, and uses SQLite/FTS5 or embedded
+seekdb for repository navigation, symbol search, callers/callees, change impact, test candidates, and cited source reads.
 The production path requires no CodeGraph process, CLI, MCP server, or database format, and no LLM, embedding model,
 or graph database. The graph is a rebuildable cache of current code; Memory, Experience, Profile, Topic Memory, and
 Handoff continue to hold historical knowledge and work state.
 
-Add no tables to the business database. The code cache contains only two ordinary tables, `code_nodes` and
-`code_edges`, and one full-text virtual table, `code_search_fts`. File inventories, build metadata, and per-file raw
-extraction facts live in cache files published atomically with the index.
+SQLite uses a separate cache with `code_nodes`, `code_edges`, and the `code_search_fts` virtual table. Embedded seekdb
+uses dedicated `pc_code_generations`, `pc_code_nodes`, and `pc_code_edges` tables in the configured local database,
+plus a native full-text index. File inventories, source snapshots, diagnostics, and per-file extraction facts remain
+in local cache files. Existing Artifact tables are unchanged.
 
 The explicit mixed Python, TypeScript/JavaScript, and Go repository loop is implemented: **index → locate → expand relationships → read evidence → edit
 → sync → inspect impact and tests**. CLI, Runtime, Client, HTTP/MCP, optional PreparedContext, and Codex/Claude Code
@@ -156,7 +157,7 @@ flowchart TD
     A[Scope authorization and repository binding] --> B[Manifest and consistent content capture]
     B --> C[Tree-sitter extraction]
     C --> D[Module and name resolution]
-    D --> E[SQLite nodes / edges / FTS]
+    D --> E[SQLite or embedded seekdb: nodes / edges / FTS]
     E --> F[Bounded search and traversal]
     B --> G[Content-addressed source]
     F --> H[Code evidence and budget rendering]
@@ -185,9 +186,10 @@ so pathological files cannot block the service event loop. Packaging acceptance 
 and wheel/sdist installations. A missing parser is reported as an extraction failure; production startup does not
 download a grammar on demand.
 
-The standard SQLite/FTS5 cache is independent of the Memory database abstraction. Whether PowerContext uses SQLite,
-OceanBase, or seekdb, the code cache remains on the repository host. Shared multi-replica querying is outside the
-initial scope. Check FTS5 at startup and fail explicitly when unavailable rather than switching retrieval behavior.
+Code storage follows the local deployment: embedded seekdb uses the configured database directory; SQLite and
+OceanBase deployments retain the separate SQLite/FTS5 code cache. GraphReader/GraphStore isolate SQL from parsing,
+traversal, evidence rendering, and PreparedContext. Code data remains a rebuildable cache on the repository host.
+Shared multi-replica querying is outside the scope. An unavailable full-text backend fails explicitly.
 
 ## 2. Content identity and storage
 
@@ -209,8 +211,8 @@ as `source_roots`. Preserve full Git object IDs and distinguish them from SHA-25
 `dirty` separately describes in-scope changes against HEAD; equal commits do not imply equal content.
 When staged and unstaged versions differ, analyze actual worktree bytes and retain the observed Git state.
 
-The initial schema has **three logical tables: two ordinary tables and one FTS5 virtual table**. Do not create separate
-file, reference, binding, index-version, or test-association tables, or extend existing Artifact tables.
+The SQLite schema has **three logical tables: two ordinary tables and one FTS5 virtual table**. Files and references
+remain nodes and relationships rather than separate Artifact types.
 
 | Table | Records and principal fields |
 | --- | --- |
@@ -221,6 +223,19 @@ file, reference, binding, index-version, or test-association tables, or extend e
 Included files are `kind=file` nodes. Definitions use `file_id` for file ownership and `parent_id` for lexical nesting.
 Omitted files appear only in the manifest. Source ranges and adjacency remain ordinary indexed columns, not JSON-only
 fields. SQLite-managed FTS5 shadow tables are outside the three-logical-table count and application-owned lifecycle.
+
+Embedded seekdb has three ordinary tables: `pc_code_nodes` and `pc_code_edges` carry generation-scoped graph rows;
+`pc_code_generations` records the binding, content checksum, row counts, and serialized byte size. Native full-text
+search indexes node search text. Binary path/name comparisons preserve case, literal wildcard characters, and spaces.
+The binding identity includes the backend and canonical seekdb directory, so switching databases cannot reuse another
+index accidentally. `pylibseekdb>=1.4.0.post1` permits the local CLI and Server to open the same directory; all graph
+connections drain before the owning embedded handle closes. The supported deployment remains local.
+
+Each build persists its cleanup descriptor, commits complete immutable graph rows, then atomically publishes the
+local generation pointer. Source/facts/diagnostic files and DB rows are checked against the same manifest. Interrupted
+publication leaves the previous pointer intact. Cleanup deletes unreachable DB generations and their local files
+only after reader locks permit removal. The cache budget includes local files and serialized graph rows; seekdb's
+physical indexes, logs, engine metadata, and reserved capacity are additional disk usage.
 
 Other data has explicit storage locations:
 
@@ -244,7 +259,7 @@ generation-bound original call/reference; structural contains edges may omit it.
 query time without a test-mapping table.
 
 `manifest.json` is authoritative for snapshot inventory; file nodes are its query projection. Validate matching paths,
-digests, and parse status before publication. Manifest, facts, diagnostics, SQLite, and source form one generation
+digests, and parse status before publication. Manifest, facts, diagnostics, the graph, and source form one generation
 and are verified and published together; no individual component may be replaced in place. Database and companion
 checksums verify publication integrity without participating in a circular calculation of their own content digests.
 
@@ -275,7 +290,7 @@ JS/TS follows relative ESM imports and named/default exports, retaining candidat
 module identity from captured `go.mod` files, resolving functions within a package or explicit imports inside the same
 module. Build constraints do not select the host platform. Shared search never turns identical names into cross-language
 calls. Adding a language requires grammar registration, extraction/resolution rules, and behavior regressions; it reuses
-SQLite storage, citation checks, budgets, and PreparedContext assembly.
+graph storage, citation checks, budgets, and PreparedContext assembly.
 
 
 The first pass extracts files, classes, functions, methods, nested definitions, signatures, decorators, base-class
@@ -634,8 +649,10 @@ concurrent builds/queries, cache collection, Scope revocation,
 missing FTS5, tiny budgets, oversized lines, Topic Memory defaults, and real-host duplicate injection.
 
 Compare incremental and full rebuilds on public query semantics for identical bytes, not private IDs or call counts.
-SQLite/OceanBase/seekdb product acceptance concerns combined code/history, authorization, fallback, and budgets; it
-does not require graph tables in all three business databases.
+SQLite and embedded seekdb acceptance covers real graph persistence, full-text and structural queries, local CLI
+coexistence with Server, restart, failed publication, integrity, reader-safe cleanup, and PreparedContext. OceanBase
+deployments retain the local SQLite graph; their combined code/history acceptance covers authorization, fallback,
+and budgets rather than remote graph storage.
 
 # Drawbacks
 
@@ -651,7 +668,7 @@ tools and an opt-in feature remain a valid outcome.
 
 | Alternative | Tradeoff |
 | --- | --- |
-| Native Tree-sitter, resolution, SQLite | Own semantics, budgets, updates, and deployment; accept resolver maintenance; selected here |
+| Native Tree-sitter, resolution, SQLite/embedded seekdb | Own semantics, budgets, updates, and deployment; accept resolver maintenance; selected here |
 | External CodeGraph MCP/CLI or embedded runtime | Faster access to broad coverage, with external lifecycle/behavior dependencies; retained as evaluation baseline |
 | grep/text index only | Cheap and essential baseline, without explicit relationship/change paths |
 | Python ast only | Lightweight standard library, tied to interpreter grammar and requiring another multi-language extraction path |
@@ -686,7 +703,7 @@ incremental maintenance internally. Engine validation precedes automatic prepare
 - Are multi-replica services or remote code workers required? They change source distribution and authorization and
   need a separate design, not a shared mount of a local cache.
 
-Local mixed-language repositories, Tree-sitter, SQLite, no required LLM, incremental extraction with global resolution, and on-demand
+Local mixed-language repositories, Tree-sitter, SQLite/embedded seekdb, no required LLM, incremental extraction with global resolution, and on-demand
 queries are decided here. These remaining questions do not block the minimum loop.
 
 # Future possibilities

@@ -18,13 +18,15 @@ import stat
 import time
 import uuid
 from collections.abc import Iterator
-from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
+from contextlib import AbstractContextManager, ExitStack, contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from powercontext.builtin.code.capture import check_deadline, digest_bytes, json_bytes, write_private
 from powercontext.builtin.code.errors import CodeError
+from powercontext.builtin.code.graph import GraphReader, GraphStore
+from powercontext.builtin.code.store import SQLiteGraphStore
 from powercontext.builtin.code.telemetry import stage
 
 
@@ -101,10 +103,14 @@ def generation_name(reference: dict[str, Any]) -> str:
 class Generation:
     directory: Path
     manifest: dict[str, Any]
+    store: GraphStore = field(default_factory=SQLiteGraphStore)
 
     @property
     def fingerprint(self) -> str:
         return self.manifest["fingerprint"]
+
+    def graph(self, deadline: float) -> AbstractContextManager[GraphReader]:
+        return self.store.open(self.directory, self.manifest, deadline)
 
     def source(self, path: str, deadline: float) -> bytes:
         record = self.manifest["included_files"].get(path)
@@ -119,8 +125,9 @@ class Generation:
 
 
 class GenerationCache:
-    def __init__(self, directory: Path) -> None:
+    def __init__(self, directory: Path, store: GraphStore | None = None) -> None:
         self.directory = directory
+        self.store = store if store is not None else SQLiteGraphStore()
 
     def initialize(self) -> None:
         self.directory.mkdir(parents=True, mode=0o700, exist_ok=True)
@@ -154,12 +161,12 @@ class GenerationCache:
             raise CodeError("index_integrity_failed")
         try:
             manifest = json.loads(content)
-            database_hash = hash_file(directory / "graph.sqlite", deadline)
+            if not isinstance(manifest, dict):
+                raise CodeError("index_integrity_failed")
+            self.store.verify(directory, manifest, deadline)
         except (OSError, ValueError) as error:
             raise CodeError("index_integrity_failed") from error
-        if not isinstance(manifest, dict) or database_hash != manifest.get("database_sha256"):
-            raise CodeError("index_integrity_failed")
-        return Generation(directory, manifest)
+        return Generation(directory, manifest, self.store)
 
     @contextmanager
     def pin(self, deadline: float, *, previous: bool = False) -> Iterator[tuple[Generation, Generation | None]]:
@@ -220,7 +227,7 @@ class GenerationCache:
                 "current.json", {"current": reference, "previous": pointer["current"] if pointer else None}
             )
             self.collect(self.pointer(), deadline)
-        return Generation(directory, manifest)
+        return Generation(directory, manifest, self.store)
 
     def replace_json(self, name: str, value: dict[str, Any]) -> None:
         temporary = self.directory / ("pending-" + uuid.uuid4().hex)
@@ -241,6 +248,7 @@ class GenerationCache:
             check_deadline(deadline)
             if path.is_file() and not path.is_symlink():
                 size += path.stat().st_size
+        size += self.store.size(self.directory, deadline)
         return size
 
     def clear(self, deadline: float) -> dict[str, Any]:
@@ -258,6 +266,7 @@ class GenerationCache:
             self.collect(None, deadline)
             for path in self.directory.glob("staging-*"):
                 if path.is_dir() and not path.is_symlink():
+                    self.store.remove(path, deadline)
                     shutil.rmtree(path)
             retained = sum(path.is_dir() and not path.is_symlink() for path in self.directory.glob("generation-*"))
             return {"status": "cleared", "retained_reader_generations": retained}
@@ -269,6 +278,7 @@ class GenerationCache:
                 continue
             try:
                 with file_lock(path / "reader.lock", deadline, wait=False):
+                    self.store.remove(path, deadline)
                     shutil.rmtree(path)
             except CodeError as error:
                 if error.code != "code_cache_busy":

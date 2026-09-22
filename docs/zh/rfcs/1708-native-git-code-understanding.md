@@ -15,9 +15,11 @@ description: 设计 PowerContext 内的原生符号索引、跨文件关系、�
 
 # Summary
 
-在 PowerContext 内实现原生代码理解引擎：读取获授权的本地 Git 工作区，以 Tree-sitter 提取符号和引用，通过静态名称解析建立跨文件关系，使用独立 SQLite/FTS5 缓存提供仓库导航、符号检索、调用者/被调用者、变更影响、候选测试和带出处的源码读取。生产路径不依赖 CodeGraph 进程、CLI、MCP 或数据库格式，也不要求 LLM、embedding 或图数据库。代码图是可以重建的当前代码缓存，Memory、Experience、Profile、Topic Memory 和 Handoff 继续承载历史知识与工作状态。
+在 PowerContext 内实现原生代码理解引擎：读取获授权的本地 Git 工作区，以 Tree-sitter 提取符号和引用，通过静态名称解析建立跨文件关系，使用 SQLite/FTS5 或嵌入式 seekdb 提供仓库导航、符号检索、调用者/被调用者、变更影响、候选测试和带出处的源码读取。生产路径不依赖 CodeGraph 进程、CLI、MCP 或数据库格式，也不要求 LLM、embedding 或图数据库。代码图是可以重建的当前代码缓存，Memory、Experience、Profile、Topic Memory 和 Handoff 继续承载历史知识与工作状态。
 
-现有业务数据库不新增表。代码缓存仅包含 `code_nodes`、`code_edges` 两张普通表和 `code_search_fts` 一张全文索引虚拟表；文件清单、构建元数据及每文件原始解析事实保存为随索引原子发布的缓存文件。
+SQLite 使用独立缓存中的 `code_nodes`、`code_edges` 普通表和 `code_search_fts` 全文索引虚拟表。
+嵌入式 seekdb 在配置的本地数据库中使用 `pc_code_generations`、`pc_code_nodes`、`pc_code_edges` 三张专用表及原生全文索引。
+文件清单、源码快照、诊断及每文件原始解析事实保留在本地缓存文件中；现有 Artifact 表保持原有结构。
 
 Python、TypeScript/JavaScript 和 Go 混合仓库已具备显式闭环：**索引仓库 → 定位入口 → 展开关系 → 阅读证据 → 修改代码 → 增量同步 → 复核影响与测试**。CLI、Runtime、Client、HTTP/MCP、可选 PreparedContext 和 Codex/Claude Code Hook 已接入，默认关闭。安装和调用见[仓库代码工作流](../docs/workflows/repository-code.md)。A/B 的主要对照是 CodeGraph 核心引擎与原生引擎，另设普通搜索/读取基线；自动加入 PreparedContext 作为独立实验。本文的质量、成本与性能门槛是发布判据，不代表已达标的承诺。
 
@@ -122,7 +124,7 @@ flowchart TD
     A[Scope 授权与仓库绑定] --> B[文件清单与一致内容捕获]
     B --> C[Tree-sitter 结构提取]
     C --> D[模块与名称解析]
-    D --> E[SQLite 节点 / 关系 / FTS]
+    D --> E[SQLite 或嵌入式 seekdb：节点 / 关系 / FTS]
     E --> F[有界搜索与图遍历]
     B --> G[按摘要保存的源码]
     F --> H[代码证据与预算渲染]
@@ -146,7 +148,9 @@ flowchart TD
 
 原生引擎直接使用固定版本的 Python Tree-sitter binding，以及 Python、JavaScript、TypeScript/TSX、Go grammar，通过可选 `code` extra 安装并锁入 `uv.lock`。不依赖 CodeGraph 的解析器、npm 运行时或私有节点结构。解析器在受资源限制的工作进程执行，避免大文件或异常语法阻塞服务事件循环。安装验收覆盖项目支持的 Python 版本及 wheel/sdist；缺少可用解析器时报告解析失败，不在生产启动时临时下载 grammar。
 
-缓存采用标准 SQLite/FTS5，不走 Memory 的业务数据库抽象。因此 PowerContext 使用 SQLite、OceanBase 或 seekdb 时，代码索引仍然是仓库所在主机的可重建缓存；首期不承诺多副本共享查询。启动时检查 FTS5 能力，缺失时明确失败，不静默切换到质量不同的引擎。
+代码存储跟随本地部署方式：嵌入式 seekdb 使用配置的数据库目录；SQLite 和 OceanBase 部署沿用独立 SQLite/FTS5 代码缓存。
+GraphReader/GraphStore 隔离 SQL 与解析、遍历、证据渲染和 PreparedContext。代码索引仍是仓库所在主机的可重建缓存，
+不支持多服务实例共享；全文检索后端不可用时明确失败。
 
 ## 2. 内容身份与存储模型
 
@@ -163,7 +167,7 @@ fingerprint = sha256(canonical_encoding(
 
 使用明确长度的规范编码，不能靠字符串连接拼接。`resolution_config_digest` 包含 `source_roots` 等名称解析配置。HEAD 保留完整 Git object ID；内容摘要固定 SHA-256，两者不混淆。`dirty` 单独记录纳入范围内相对 HEAD 的修改；相同 HEAD 不代表相同内容。暂存与未暂存并存时，以实际磁盘字节为当前分析内容，并保留 Git 状态观测。
 
-首期固定为 **3 张逻辑表：2 张普通表 + 1 张 FTS5 虚拟表**。不为文件、引用、绑定、索引版本和测试关联分别建表，也不扩展现有 Artifact 表。
+SQLite 使用 **3 张逻辑表：2 张普通表 + 1 张 FTS5 虚拟表**。文件和引用通过节点与关系表达，不创建独立 Artifact 类型。
 
 | 表 | 记录与主要字段 |
 | --- | --- |
@@ -172,6 +176,17 @@ fingerprint = sha256(canonical_encoding(
 | `code_search_fts` | 以节点为检索单元，索引路径、名称、拆分标识符、签名、文档字符串和选定文档标题 |
 
 纳入查询范围的文件使用 `kind=file` 节点，函数、类、方法等通过 `file_id` 归属文件、通过 `parent_id` 表达词法层级。省略文件只列入 manifest。源码范围和图邻接使用普通列及索引，不能为了合表而把高频查询字段都放入 JSON。FTS5 自动生成的内部辅助表不计入这 3 张逻辑表，应用不维护其生命周期。
+
+嵌入式 seekdb 使用三张普通表：`pc_code_nodes` 和 `pc_code_edges` 按 generation 隔离图记录；
+`pc_code_generations` 保存绑定、内容摘要、记录数量和序列化大小，节点搜索字段使用原生全文索引。
+路径与名称采用二进制比较，保留大小写、字面通配符及空格的差别。绑定身份包含后端与规范化 seekdb 目录，
+避免切换数据库后误用其他索引。`pylibseekdb>=1.4.0.post1` 支持本机 CLI 与 Server 打开同一目录；
+图查询连接全部结束后才关闭嵌入式句柄，部署范围仍限于本机。
+
+构建先持久化清理描述文件，再提交完整、不可变的图记录，最后原子发布本地版本指针。
+源码、facts、诊断文件与数据库记录按同一 manifest 校验。发布中断保留此前指针；回收取得读者锁后，
+才删除无引用版本的数据库记录及本地文件。缓存预算统计本地文件与图记录的序列化大小，
+seekdb 的物理索引、日志、引擎元数据和预留空间属于额外磁盘开销。
 
 其余数据的落点明确如下：
 
@@ -187,7 +202,7 @@ fingerprint = sha256(canonical_encoding(
 
 每次构建从 facts 重建关系与 diagnostics；原始引用即使解析成功也不会被删掉。没有目标的引用不伪造图节点或空目标边，原因在 diagnostics 中保留；有候选目标时可生成明确标记的 candidate 边。`code_edges.reference_key` 指向本 generation 绑定的原始调用/引用位置，结构性的 contains 边可不带该字段。测试线索与影响集合按查询计算，不增加测试映射表。
 
-`manifest.json` 是快照清单的权威记录，文件节点是供查询使用的投影；发布前核对二者的路径、摘要与解析状态一致。manifest、facts、diagnostics、SQLite 和源码共同组成 generation，一起校验和发布，禁止单独替换其中一份文件。数据库和配套文件的校验值是发布完整性数据，不参与自身内容摘要的循环计算。
+`manifest.json` 是快照清单的权威记录，文件节点是供查询使用的投影；发布前核对二者的路径、摘要与解析状态一致。manifest、facts、diagnostics、代码图和源码共同组成 generation，一起校验和发布，禁止单独替换其中一份文件。数据库和配套文件的校验值是发布完整性数据，不参与自身内容摘要的循环计算。
 
 这种存储方式保留三类主要查询：节点定位、关系遍历和全文检索；代价是全库原始引用/未解析诊断需要按文件汇总，不能直接做 SQL 联表分析。构建时重建的模块索引和读取 facts 的成本纳入内存、同步和诊断预算。首期接受这一取舍；后续仅在实测证明文件汇总成为瓶颈时评估独立引用表。
 
@@ -195,13 +210,13 @@ fingerprint = sha256(canonical_encoding(
 
 Tree-sitter 使用字节位置。结构提取支持可严格解码的 UTF-8 Python、TypeScript/JavaScript 和 Go 文件；非 UTF-8、二进制及不支持的语言列入 coverage，不错误地转换后复用原字节偏移。API 行号为 1-based 闭区间，字节范围为半开区间。CRLF 和非 ASCII 内容必须可逐字节回读。
 
-源码按内容摘要保存在私有缓存。只允许 generation manifest 中的文件通过查询返回。发布后的 SQLite 与源码对象不可变，不硬链接可被用户编辑的工作区文件。
+源码按内容摘要保存在私有缓存。只允许 generation manifest 中的文件通过查询返回。发布后的图记录与源码对象不可变，不硬链接可被用户编辑的工作区文件。
 
 ## 3. 结构提取和跨文件解析
 
 语言注册表集中管理扩展名、安装包、grammar 版本、测试文件约定和提取规则版本。工作进程按语言/TSX 方言惰性加载解析器，输出统一的节点、作用域、引用和诊断；Python 沿用原有解析规则，JS/TS 与 Go 各自解析模块及包关系，然后合并到同一图。解析器和 resolver 的版本进入 fingerprint；单文件提取缓存只依赖其自身语言规则，规则升级后旧索引须同步。
 
-JS/TS 解析相对 ESM 导入与具名/默认导出，无法唯一定位模块时保留候选。Go 从捕获的 `go.mod` 获取当前模块身份，在同一包或同一模块的显式导入中解析函数，构建标签和平台文件不作运行环境选择。跨语言仅共享检索，不由同名符号推断调用。新增语言需提供提取和关系规则、注册 grammar，并补充行为回归；SQLite、引用校验、预算与 PreparedContext 组装无需另建一套。
+JS/TS 解析相对 ESM 导入与具名/默认导出，无法唯一定位模块时保留候选。Go 从捕获的 `go.mod` 获取当前模块身份，在同一包或同一模块的显式导入中解析函数，构建标签和平台文件不作运行环境选择。跨语言仅共享检索，不由同名符号推断调用。新增语言需提供提取和关系规则、注册 grammar，并补充行为回归；图存储、引用校验、预算与 PreparedContext 组装无需另建一套。
 
 第一遍记录文件、类、函数、方法、嵌套定义、签名、装饰器、继承表达式、import 和调用/引用点。第二遍建立内存模块索引并解析引用，顺序固定：词法局部绑定 → 显式 import/alias → 相对导入 → 仓库内模块导出。`src` layout 由 `source_roots` 解决；namespace package 或多 root 同名模块有歧义时返回候选，不执行 Python 导入来猜答案。
 
@@ -409,7 +424,9 @@ M0/M1 可直接通过本地 CLI 使用，不要求先完成远程接口、业务
 
 关键验收包括：同名定义与 alias/re-export、循环和菱形路径、嵌套测试、删除后恢复、未修改调用者重绑定、分支切换、不同 worktree、同 mtime/size 内容变化、UTF-8/CRLF、解析错误区域、facts 缺失/损坏、manifest 与节点摘要不一致、符号链接置换、构建中断/重启、构建与查询并发、缓存回收、scope 撤权、无 FTS5、预算过小、源码超长行、Topic Memory 默认值及真实宿主重复注入。
 
-增量结果必须与相同字节上的全量重建比较公开查询语义，而不是内部节点编号或调用次数。SQLite/OceanBase/seekdb 的产品验收重点是代码服务与历史上下文组合、授权、降级及预算保持一致，不要求把图表迁入三种业务数据库。
+增量结果必须与相同字节上的全量重建比较公开查询语义，而不是内部节点编号或调用次数。
+SQLite 与嵌入式 seekdb 验收覆盖真实图存储、全文和结构查询、在线 CLI、重启、发布失败、完整性校验、读者安全回收及 PreparedContext。
+OceanBase 部署继续使用本地 SQLite 代码图，组合验收覆盖历史上下文、授权、降级与预算，不涉及远程图存储。
 
 # Drawbacks
 
@@ -421,7 +438,7 @@ M0/M1 可直接通过本地 CLI 使用，不要求先完成远程接口、业务
 
 | 方案 | 取舍 |
 | --- | --- |
-| 原生 Tree-sitter + 关系解析 + SQLite | 直接拥有语义、预算、更新和部署边界；承担解析维护成本，本文选择 |
+| 原生 Tree-sitter + 关系解析 + SQLite/嵌入式 seekdb | 直接拥有语义、预算、更新和部署边界；承担解析维护成本，本文选择 |
 | CodeGraph 外部 MCP/CLI 或嵌入其运行时 | 能快速获得更广覆盖，但生产依赖、生命周期和行为受外部引擎约束；保留作评测基线 |
 | 只有 grep/文本索引 | 成本低，是必须保留的基线；缺少显式关系和变更路径 |
 | 只有 Python ast | 标准库轻量，但受解释器语法版本限制，多语言需另起提取体系；不作为长期核心 |
@@ -452,7 +469,7 @@ CodeGraph 依据：[公开引擎入口](https://github.com/colbymchenry/codegrap
 - 首批语言之外的 grammar 和语义规则如何验收？按真实任务分布选择，并保留独立的语言回归。
 - 是否有必须部署多副本或远程代码 worker 的用户？该需求将改变源码分发与权限模型，需要单独设计，不能将本地缓存目录直接挂载为共享服务。
 
-本文已决定本地混合语言仓库、Tree-sitter、SQLite、无 LLM 前置依赖、增量提取加全图解析和按需查询；上述问题不妨碍开始实现最小闭环。
+本文已决定本地混合语言仓库、Tree-sitter、SQLite/嵌入式 seekdb、无 LLM 前置依赖、增量提取加全图解析和按需查询；上述问题不妨碍开始实现最小闭环。
 
 # Future possibilities
 
