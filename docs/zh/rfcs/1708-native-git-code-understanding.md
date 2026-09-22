@@ -388,7 +388,7 @@ A/B 固定相同 scope、文件 manifest、操作 schema、工具说明、输出
 
 引擎可用后再比较 B0（按需代码查询）与 B1（相同引擎 + `include_code`），固定历史内容、总注入预算及模型，测量自动注入是否真的减少后续调查，是否挤掉重要历史约束。不可把 B1 的结果混入 A/B 引擎对照。
 
-需要解释收益来源时，分别禁用图展开、保留符号/词法索引，或增加可选语义检索层；一次只改变一个因素。OpenViking 可作为独立的目录/语义检索对照 D，须记录自己的建库模型、embedding、摘要成本和文件范围；不进入首期必须运行的 144 次，也不以其历史结果代替本轮测量。
+需要解释收益来源时，分别禁用图展开、保留符号/词法索引，或增加可选语义检索层；一次只改变一个因素。
 
 ## 10. 实施阶段与验收
 
@@ -424,8 +424,6 @@ M0/M1 可直接通过本地 CLI 使用，不要求先完成远程接口、业务
 | 目录摘要 + 向量检索 | 有助于宽泛语义导航，需要模型成本与刷新策略，不能单独替代调用图 |
 | 专用图数据库 | 可以容纳更大共享图，但增加部署和授权复杂度；首期单仓库不需要 |
 
-采用 OpenViking 的分层导航思路时，首期只构建确定性地图，暂不把全库 LLM 摘要设为前置条件。语义摘要与检索应以独立消融证明价值。
-
 # Prior art
 
 ## 检查过的实现
@@ -435,19 +433,12 @@ M0/M1 可直接通过本地 CLI 使用，不要求先完成远程接口、业务
 | 对象 | 固定版本 | 对本方案的启发与边界 |
 | --- | --- | --- |
 | CodeGraph | `ba3c21e50d9129d2f5f3843ec3728868ae6d47a1`，package 1.6.0 | 提取、关系解析、SQLite/FTS、图遍历和增量更新构成核心；MCP 是交付入口 |
-| OpenViking | `20ec78a149a0889a85b038627dddc70b46dceae3` | Git 获取、目录保留、代码骨架、摘要与层级检索；不能据此推断具备相同的调用图语义 |
 | PowerContext #1619 | PR head `8b71c1e9e65298cb0d92a50b74404fe6e73008ed`，检查时 OPEN | 定义 opt-in prepare、Scope、预算与代码证据边界；内部适配器依赖 CodeGraph |
 
 CodeGraph 依据：[公开引擎入口](https://github.com/colbymchenry/codegraph/blob/ba3c21e50d9129d2f5f3843ec3728868ae6d47a1/src/index.ts)、
 [存储模型](https://github.com/colbymchenry/codegraph/blob/ba3c21e50d9129d2f5f3843ec3728868ae6d47a1/src/db/schema.sql)、
 [关系解析](https://github.com/colbymchenry/codegraph/blob/ba3c21e50d9129d2f5f3843ec3728868ae6d47a1/src/resolution/index.ts)、
 [增量提取](https://github.com/colbymchenry/codegraph/blob/ba3c21e50d9129d2f5f3843ec3728868ae6d47a1/src/extraction/index.ts)。
-
-OpenViking 依据：[GitAccessor](https://github.com/volcengine/OpenViking/blob/20ec78a149a0889a85b038627dddc70b46dceae3/openviking/parse/accessors/git_accessor.py)、
-[代码目录导入](https://github.com/volcengine/OpenViking/blob/20ec78a149a0889a85b038627dddc70b46dceae3/openviking/parse/parsers/code/code.py)、
-[骨架选择](https://github.com/volcengine/OpenViking/blob/20ec78a149a0889a85b038627dddc70b46dceae3/openviking/parse/parsers/code/ast/providers.py)、
-[摘要处理](https://github.com/volcengine/OpenViking/blob/20ec78a149a0889a85b038627dddc70b46dceae3/openviking/storage/queuefs/semantic_processor.py)、
-[层级检索](https://github.com/volcengine/OpenViking/blob/20ec78a149a0889a85b038627dddc70b46dceae3/openviking/retrieve/hierarchical_retriever.py)。其骨架路由在存在 maintained tags query 时使用该 query，结果无效则请求 LLM fallback；没有该 query 时才尝试 process extractor，不能假设所有文件都会依次走两种 AST 提取。
 
 [PR #1619 的具体文档](https://github.com/Teingi/powercontext/blob/8b71c1e9e65298cb0d92a50b74404fe6e73008ed/docs/zh/rfcs/1619-git-repository-understanding.md)描述的是内部 CodeGraph 适配器，不宜把全部设计归结为 MCP。本方案保留其临时代码证据和业务模型边界，自行实现提取、解析、图查询和增量维护；先验证引擎，再验证自动 prepare。
 

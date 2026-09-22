@@ -597,9 +597,7 @@ content, total injection budget, and model. Measure subsequent investigation and
 constraints. Do not mix B1 results into engine A/B scores.
 
 To explain gains, disable graph expansion while retaining symbol/lexical search, or separately add an optional semantic
-layer, changing one factor at a time. OpenViking can form a separate directory/semantic retrieval arm D with its own
-models, embedding, summary cost, and corpus recorded. It is outside the required initial 144 runs, and its historical
-results cannot replace new measurements.
+layer, changing one factor at a time.
 
 ## 10. Delivery and acceptance
 
@@ -647,9 +645,6 @@ tools and an opt-in feature remain a valid outcome.
 | Directory summaries and vectors | Useful for broad navigation, with model/refresh costs; not a replacement for call relationships |
 | Dedicated graph database | Supports larger shared graphs but adds deployment/authorization complexity unnecessary initially |
 
-Borrow hierarchical navigation from OpenViking through deterministic maps first. Whole-repository LLM summaries are
-not prerequisites; semantic summaries and retrieval require separate ablation evidence.
-
 # Prior art
 
 ## Inspected implementations
@@ -659,21 +654,12 @@ Research date: 2026-09-21. These references identify inspected source, not each 
 | Project | Pinned version | Lesson and boundary |
 | --- | --- | --- |
 | CodeGraph | `ba3c21e50d9129d2f5f3843ec3728868ae6d47a1`, package 1.6.0 | Extraction, resolution, SQLite/FTS, traversal, and updates are the core; MCP is a delivery surface |
-| OpenViking | `20ec78a149a0889a85b038627dddc70b46dceae3` | Git acquisition, preserved directories, skeletons, summaries, hierarchical retrieval; not evidence of equivalent call-graph semantics |
 | PowerContext #1619 | PR head `8b71c1e9e65298cb0d92a50b74404fe6e73008ed`, OPEN when checked | Opt-in prepare, Scope, budgets, ephemeral evidence; its internal adapter depends on CodeGraph |
 
 CodeGraph sources: [engine entry](https://github.com/colbymchenry/codegraph/blob/ba3c21e50d9129d2f5f3843ec3728868ae6d47a1/src/index.ts),
 [storage](https://github.com/colbymchenry/codegraph/blob/ba3c21e50d9129d2f5f3843ec3728868ae6d47a1/src/db/schema.sql),
 [resolution](https://github.com/colbymchenry/codegraph/blob/ba3c21e50d9129d2f5f3843ec3728868ae6d47a1/src/resolution/index.ts),
 [incremental extraction](https://github.com/colbymchenry/codegraph/blob/ba3c21e50d9129d2f5f3843ec3728868ae6d47a1/src/extraction/index.ts).
-
-OpenViking sources: [GitAccessor](https://github.com/volcengine/OpenViking/blob/20ec78a149a0889a85b038627dddc70b46dceae3/openviking/parse/accessors/git_accessor.py),
-[code import](https://github.com/volcengine/OpenViking/blob/20ec78a149a0889a85b038627dddc70b46dceae3/openviking/parse/parsers/code/code.py),
-[skeleton routing](https://github.com/volcengine/OpenViking/blob/20ec78a149a0889a85b038627dddc70b46dceae3/openviking/parse/parsers/code/ast/providers.py),
-[semantic processing](https://github.com/volcengine/OpenViking/blob/20ec78a149a0889a85b038627dddc70b46dceae3/openviking/storage/queuefs/semantic_processor.py),
-[hierarchical retrieval](https://github.com/volcengine/OpenViking/blob/20ec78a149a0889a85b038627dddc70b46dceae3/openviking/retrieve/hierarchical_retriever.py).
-When a maintained tags query exists, skeleton routing uses it and requests LLM fallback if it is unhelpful. The process
-extractor is tried when no maintained query exists; files do not universally pass through both AST providers in sequence.
 
 [The #1619 document](https://github.com/Teingi/powercontext/blob/8b71c1e9e65298cb0d92a50b74404fe6e73008ed/docs/en/rfcs/1619-git-repository-understanding.md)
 describes an internal CodeGraph adapter, so the entire proposal should not be characterized as MCP. This proposal
