@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 from typing import cast
 
-from sqlalchemy import event
+from sqlalchemy import event, text
 
 from powercontext.builtin.artifacts.memory import (
     EmbeddingProfile,
@@ -220,6 +220,61 @@ def test_memory_append_projection_writes_do_not_grow_with_entry_history() -> Non
 
             assert early_writes == late_writes
             assert early_writes <= 4
+
+    asyncio.run(scenario())
+
+
+def test_memory_append_leaves_untouched_projection_rows_identical() -> None:
+    """Appending an entry must not rewrite the projection rows of entries it did not change (#1321)."""
+
+    async def scenario() -> None:
+        async with open_builtin_contexts(BuiltinConfig(database=SQLiteConfig())) as contexts:
+            service = (await contexts.get("lifecycle")).artifacts.memory
+            tables = (
+                (
+                    "pc_memory_entry_heads",
+                    text("SELECT * FROM pc_memory_entry_heads WHERE memory_artifact_id = :memory_artifact_id"),
+                ),
+                (
+                    "pc_memory_entry_fts",
+                    text("SELECT * FROM pc_memory_entry_fts WHERE memory_artifact_id = :memory_artifact_id"),
+                ),
+            )
+
+            async def append(memory, number: int):
+                return await service.remember(
+                    memory=memory,
+                    entries=(MemoryEntryInput(kind="fact", text=f"Bounded fact {number:04d}."),),
+                    mode="append",
+                )
+
+            async def snapshot(artifact_id: str) -> dict[tuple[str, str], dict[str, object]]:
+                rows: dict[tuple[str, str], dict[str, object]] = {}
+                async with contexts.database.transaction() as connection:
+                    for name, statement in tables:
+                        result = await connection.execute(statement, {"memory_artifact_id": artifact_id})
+                        for row in result.mappings():
+                            rows[(name, str(row["entry_id"]))] = dict(row)
+                return rows
+
+            memory = None
+            for number in range(3):
+                memory = await append(memory, number)
+            before = await snapshot(memory.artifact_id)
+            assert {name for name, _ in before} == {name for name, _ in tables}
+
+            updated = await append(memory, 3)
+            after = await snapshot(updated.artifact_id)
+
+            new_ids = {item.entry_id for item in updated.content.manifest.entries} - {
+                item.entry_id for item in memory.content.manifest.entries
+            }
+            assert new_ids
+            assert {key for key in after if key not in before} == {
+                (name, entry_id) for name, _ in tables for entry_id in new_ids
+            }
+            # Every row written before the append stays byte-identical, stamps included.
+            assert {key: value for key, value in after.items() if key[1] not in new_ids} == before
 
     asyncio.run(scenario())
 
