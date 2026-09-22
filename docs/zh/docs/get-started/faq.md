@@ -115,6 +115,110 @@ Skill。
 不会。Skill 作为 Artifact 存储在 PowerContext 中。要让 Agent 能使用它，应用（或 Remote Skill Receiver）必
 须显式下载并安装到 Agent 的工作目录。
 
+## Middleware、工具与 MCP
+
+**问：教程里经常看到“Middleware”，它是什么？**
+
+Middleware 在 Agent 的模型或工具调用前后增加行为。PowerContext 的 LangChain 适配器
+`PowerContextMiddleware` 使用 LangChain 的公开中间件 API，在调用模型前根据最近一条非空用户消息准备有界上下文。
+召回返回内容时，它会把标记为不可信历史的上下文块加入当次模型请求，而不替换 Agent 的核心循环。
+
+**问：什么时候用 Middleware，什么时候用 MCP 工具？**
+
+先区分自动召回与显式工具调用，再选择工具的接入方式：
+
+| 接入方式 | 行为与连接方式 |
+| --- | --- |
+| **LangChain Middleware** | 在符合条件的模型调用前通过 HTTP 请求上下文，不必等待模型主动请求搜索。 |
+| **LangGraph 工具** | `powercontext_tools()` 提供原生 LangChain 工具，通过 Python HTTP Client 显式操作 Memory，不涉及 MCP 连接。 |
+| **MCP 工具** | 配置好的 MCP 客户端发现并调用 Server 暴露的工具；宿主应用可以直接调用，也可以将其提供给模型。 |
+
+例如，Middleware 可以提供 CSV 项目的金额约束，显式工具则保存用户新确认的规则。通过工具访问 Memory 不一定需要
+MCP；MCP 是协议，不决定由谁触发操作。安装和可用操作详见 [LangChain](../integrations/langchain.md)、
+[LangGraph](../integrations/langgraph.md) 和[选择接口](../develop/interfaces.md)。
+
+**问：接入 PowerContext 需要重写我的 Agent 吗？**
+
+使用现有的 LangChain 集成不需要重写。保留模型与应用工具，安装适配器，并配置它与运行中的 PowerContext Server 的连接。
+下面的接线示例假设 `model` 和 `application_tools` 已初始化，`server_url` 是 Server 的 HTTP 基础地址，
+`scope_id` 是你有权访问的既有 Scope，`token` 是裸 Bearer token（无需认证时为 `None`），`question` 是当前用户输入。
+两段示例均要求远程 Server 使用 HTTPS；明文 HTTP 仅用于本机回环地址。启用访问控制时，调用者还需要解析 Scope 和执行
+所请求的 Memory 操作的权限，详见 [Scope 与访问控制](../workflows/scopes-and-access.md)。Agent 调用使用异步 API：
+
+```python
+from langchain.agents import create_agent
+from powercontext_langchain import PowerContextMiddleware, PowerContextScope
+
+agent = create_agent(
+    model,
+    tools=application_tools,
+    middleware=[PowerContextMiddleware()],
+    context_schema=PowerContextScope,
+)
+
+result = await agent.ainvoke(
+    {"messages": [{"role": "user", "content": question}]},
+    context=PowerContextScope(scope_id=scope_id, base_url=server_url, token=token),
+)
+```
+
+这个 Scope 对象配置的是 LangChain 中间件，不是独立的 LangGraph 工具。值为 `None` 的字段会回退到中间件的配置；
+使用无需认证的 Server 时，应同时省略其中的 token 配置。
+
+**问：Middleware 注入的内容会污染会话历史吗？**
+
+注入的上下文块只修改当次模型请求，中间件不会将它追加到 Agent 状态或 checkpointer 中。后续模型调用可以根据最近的用户
+消息再次请求上下文。普通对话和工具消息仍由应用的历史策略管理；如果助手在回答中复述了某条记忆，这段回答仍可能保留在
+历史中。可选的完整回合 Source 采集是另一项默认关闭的功能，详见 [LangChain 召回与采集生命周期](../integrations/langchain.md)。
+
+**问：MCP 是什么？它解决了什么问题？**
+
+MCP（Model Context Protocol，模型上下文协议）统一了兼容客户端发现和调用 Server 工具的方式。当宿主支持 MCP，且你希望
+使用该工具接口时，可以连接 PowerContext 的 MCP 端点。宿主仍需为相关操作配置连接、认证和 Scope。
+`powercontext_tools()` 不是 MCP 客户端：其中的 Memory 工具调用 `/v1/memory/remember` 等 HTTP 端点，关闭 MCP 后
+也能工作。MCP 工具目录是单独精选的接口，并不等于全部 HTTP API，详见[选择接口](../develop/interfaces.md)。
+
+**问：可以同时使用 Middleware 和显式 Memory 工具吗？**
+
+可以，但必须对齐两者的配置。下面组合的是 **LangChain Middleware 与基于 HTTP 的 LangGraph 工具**，不是 MCP 工具。
+两个包各自定义了 `PowerContextScope` 类；LangGraph 工具不识别 LangChain 的 Scope 对象，会回退到
+`POWERCONTEXT_LANGGRAPH_*` 配置。因此，传入 LangChain 包的 `PowerContextScope(scope_id=...)` 并不会配置工具写入的位置。
+
+对于只处理一个 Scope 的应用进程，在启动 Agent 前，用同一组值设置两套集成的连接、Scope 和 token。
+示例沿用上文的 `model`、`server_url`、`scope_id`、`token` 和 `question`，有意不传入任何一个包的 Scope 对象：
+
+```python
+import os
+
+from langchain.agents import create_agent
+from powercontext_langchain import PowerContextMiddleware
+from powercontext_langgraph import powercontext_tools
+
+connection = {"BASE_URL": server_url, "SCOPE_ID": scope_id, "TOKEN": token}
+for prefix in ("POWERCONTEXT_LANGCHAIN", "POWERCONTEXT_LANGGRAPH"):
+    for key, value in connection.items():
+        name = f"{prefix}_{key}"
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+
+agent = create_agent(
+    model,
+    tools=powercontext_tools(),
+    middleware=[PowerContextMiddleware()],
+)
+
+result = await agent.ainvoke(
+    {"messages": [{"role": "user", "content": question}]},
+)
+```
+
+凭据应来自应用的密钥配置，不要硬编码 token。环境变量是进程级配置，应在启动时设置一次，不能在并发处理多个 Scope 的
+应用中逐请求改写。不要假设之后覆盖 LangChain Scope 就会同时改变工具的目标。应分别核对召回的 Scope 与最终保存条目的
+Scope。配置详情见 [LangChain 连接与 Scope 设置](../integrations/langchain.md) 和
+[LangGraph 连接设置](../integrations/langgraph.md)。
+
 ## 还有疑问？
 
 - 概念模型请见[核心概念](./core-concepts.md)。
