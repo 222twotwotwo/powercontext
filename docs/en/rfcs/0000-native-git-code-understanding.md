@@ -1,11 +1,11 @@
 ---
-title: Native Git Code Understanding and Controlled Evaluation
-description: Implement symbol indexing, cross-file relationships, impact analysis, and source delivery inside PowerContext, and evaluate quality and cost against controlled baselines.
+title: Native Git Code Understanding
+description: Design native symbol indexing, cross-file relationships, incremental updates, impact analysis, and source delivery inside PowerContext.
 ---
 
 - Proposal Name: `native_git_code_understanding`
 - Start Date: 2026-09-21
-- RFC PR: Pending
+- RFC PR: [#1708](https://github.com/oceanbase/powercontext/pull/1708)
 - Status: Implemented — experimental, opt-in
 - Design Baseline: [PowerContext c1c83c52](https://github.com/oceanbase/powercontext/tree/c1c83c52c8916bbe3df73842fb1d1998d3fb788d)
 - Related RFCs: [Memory admission](0014_memory_layer_design.md), [Evaluation](0081_end_to_end_evaluation_architecture.md),
@@ -34,10 +34,6 @@ baseline. Automatic PreparedContext injection is a separate experiment. Quality,
 are release criteria, not promises that those thresholds have been met.
 
 # Motivation
-
-See [implementation and live acceptance](0000-native-git-code-understanding-validation.md) for delivered scope, real-service checks and measured performance boundaries, and [A/B/C results](0000-native-git-code-understanding-experiment.md) for task comparisons and limits on the conclusions.
-
-The [same-harness report](0000-native-git-code-understanding-same-harness.md) preserves worktree5 tasks, model, tools, budgets and preparation while replacing the engine. Across 36 real runs, OFF passes 10/12 and both CodeGraph and native pass 11/12. Native does not demonstrate an efficiency advantage; the capability remains disabled by default.
 
 ## Scenario and pain points
 
@@ -683,17 +679,6 @@ extractor is tried when no maintained query exists; files do not universally pas
 describes an internal CodeGraph adapter, so the entire proposal should not be characterized as MCP. This proposal
 retains ephemeral evidence and business-model boundaries while implementing extraction, resolution, traversal, and
 incremental maintenance internally. Engine validation precedes automatic prepare evaluation.
-
-## Limits of existing experiments
-
-The locally retained CodeGraph/Qwen experiment ran four repetitions per arm on one understanding question. It reported
-lower time/call counts, but answer inspection found an error; it cannot establish improved fix success. The OpenViking
-experiment covered four historical fixes and 16 runs, scoring 6/8 per arm under its original oracle with higher costs
-when enabled. It tested resource retrieval, not the value of relationship graphs.
-
-Both historical reports were reread for this research and only inform protocol risks. They are not pooled into this
-RFC's formal scores. Future experiment packages should include shareable protocols and raw evidence before citing
-specific historical gain percentages.
 
 # Unresolved questions
 

@@ -1,10 +1,7 @@
 # Same-harness native engine comparison
 
-Measured results: [English report](../../../docs/en/rfcs/0000-native-git-code-understanding-same-harness.md)
-and [中文报告](../../../docs/zh/rfcs/0000-native-git-code-understanding-same-harness.md).
-The 36-run cohort scores OFF 10/12, CodeGraph 11/12 and native 11/12. Native
-increases median paired time by 24.1% and input tokens by 34.4% against CodeGraph;
-equal pass totals do not establish noninferiority or an efficiency advantage.
+Experiment and validation reports are local artifacts under `.venv/docs/{en,zh}/rfcs/`.
+The repository retains the core design and reproduction tools.
 
 The local aggregate snapshot is `.venv/evaluation/native_code/results/2026-09-22-same-harness.json`.
 It is excluded from version control, as are generated run artifacts, logs and caches.

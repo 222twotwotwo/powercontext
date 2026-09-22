@@ -1,11 +1,11 @@
 ---
-title: 原生 Git 仓库代码理解与对照评测
-description: 在 PowerContext 内实现符号索引、跨文件关系、影响分析与源码交付，以受控实验验证原生引擎的质量和成本。
+title: 原生 Git 仓库代码理解
+description: 设计 PowerContext 内的原生符号索引、跨文件关系、增量更新、影响分析与源码交付能力。
 ---
 
 - Proposal Name: `native_git_code_understanding`
 - Start Date: 2026-09-21
-- RFC PR: 待创建
+- RFC PR: [#1708](https://github.com/oceanbase/powercontext/pull/1708)
 - Status: Implemented — experimental, opt-in
 - Design Baseline: [PowerContext c1c83c52](https://github.com/oceanbase/powercontext/tree/c1c83c52c8916bbe3df73842fb1d1998d3fb788d)
 - Related RFCs: [Memory 准入](0014_memory_layer_design.md)、[评估体系](0081_end_to_end_evaluation_architecture.md)、
@@ -22,10 +22,6 @@ description: 在 PowerContext 内实现符号索引、跨文件关系、影响�
 Python 仓库已具备显式闭环：**索引仓库 → 定位入口 → 展开关系 → 阅读证据 → 修改代码 → 增量同步 → 复核影响与测试**。CLI、Runtime、Client、HTTP/MCP、可选 PreparedContext 和 Codex/Claude Code Hook 已接入，默认关闭。安装和调用见[仓库代码工作流](../docs/workflows/repository-code.md)。A/B 的主要对照是 CodeGraph 核心引擎与原生引擎，另设普通搜索/读取基线；自动加入 PreparedContext 作为独立实验。本文的质量、成本与性能门槛是发布判据，不代表已达标的承诺。
 
 # Motivation
-
-实现范围、真实服务验收和已知性能边界见[实现与真实验收](0000-native-git-code-understanding-validation.md)。任务对比与结论边界见 [A/B/C 实测报告](0000-native-git-code-understanding-experiment.md)。
-
-固定 worktree5 的任务、模型、工具、预算和自动注入策略后的引擎替换结果见[同协议实测报告](0000-native-git-code-understanding-same-harness.md)：36 次真实运行中，OFF 为 10/12，CodeGraph 与自研均为 11/12；自研尚未展示效率优势，默认保持关闭。
 
 ## 场景和痛点
 
@@ -454,12 +450,6 @@ OpenViking 依据：[GitAccessor](https://github.com/volcengine/OpenViking/blob/
 [层级检索](https://github.com/volcengine/OpenViking/blob/20ec78a149a0889a85b038627dddc70b46dceae3/openviking/retrieve/hierarchical_retriever.py)。其骨架路由在存在 maintained tags query 时使用该 query，结果无效则请求 LLM fallback；没有该 query 时才尝试 process extractor，不能假设所有文件都会依次走两种 AST 提取。
 
 [PR #1619 的具体文档](https://github.com/Teingi/powercontext/blob/8b71c1e9e65298cb0d92a50b74404fe6e73008ed/docs/zh/rfcs/1619-git-repository-understanding.md)描述的是内部 CodeGraph 适配器，不宜把全部设计归结为 MCP。本方案保留其临时代码证据和业务模型边界，自行实现提取、解析、图查询和增量维护；先验证引擎，再验证自动 prepare。
-
-## 已有实验的证据边界
-
-本机留存的 CodeGraph/Qwen 实验在单个理解题上完成 4 次/组，报告时间和工具调用下降，但答案抽查有错误；它不能证明修复成功率提升。OpenViking 的 4 个历史修复、16 次运行中，原始验收双方均为 6/8，且启用后成本上升；它测的是资源检索路径，不能用来否定代码关系图。
-
-这两份历史报告在本次研究中重新读取，仅用于确定实验设计风险，不合并进本 RFC 的正式成绩。应在后续实验包中附上可共享的协议与原始证据后再引用具体收益百分比。
 
 # Unresolved questions
 
