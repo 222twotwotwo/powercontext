@@ -936,7 +936,13 @@ class MemoryService:
         reference = base.as_ref()
         cached = self._previous_projection_cache
         if cached is not None and cached[0] == reference:
-            return cached[1]
+            active = {item.entry_version_id for item in base.content.manifest.entries if item.state == "active"}
+            if active <= cached[1].keys():
+                return cached[1]
+            # A commit whose outer transaction rolled back leaves this cache behind
+            # while the stored revision never advanced; another writer can then reuse
+            # the same reference with a different entry set, so a cached revision
+            # missing an active version belongs to no stored revision.
         projections = {
             projection.entry_version.entry_version_id: projection
             for projection in await self._backend.projections(reference)
