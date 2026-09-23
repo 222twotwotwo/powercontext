@@ -19,7 +19,7 @@ from typing import Any
 from powercontext.builtin.code.capture import check_deadline
 from powercontext.builtin.code.resolve import RESOLVER_BUILD, PythonResolver, Resolution
 
-RESOLVER_BUILDS = {"python": RESOLVER_BUILD, "ecmascript": "ecmascript-static-1", "go": "go-static-1"}
+RESOLVER_BUILDS = {"python": RESOLVER_BUILD, "ecmascript": "ecmascript-static-2", "go": "go-static-1"}
 
 
 def resolve_facts(facts: list[dict[str, Any]], source_roots: tuple[str, ...], deadline: float):
@@ -96,6 +96,10 @@ class ModuleResolver:
         visited = visited | {key}
         name, *suffix = expression.split(".")
         bindings = self.bindings.get((scope, name), [])
+        if self.scopes[scope]["kind"] == "class":
+            # Class members are properties, not lexical variables. Only a named
+            # class expression contributes its own name to this lexical scope.
+            bindings = [binding for binding in bindings if binding.get("target") == scope]
         if (
             self.scopes[scope]["kind"] == "file"
             and self.nodes[scope]["language"] == "go"
@@ -116,10 +120,7 @@ class ModuleResolver:
             return Resolution(reason="local_binding")
         parent = self.scopes[scope]["parent"]
         if parent is not None:
-            # A method's body has no unqualified access to its class members.
-            if self.scopes[scope]["kind"] == "method" and self.scopes[parent]["kind"] == "class":
-                parent = self.scopes[parent]["parent"]
-            return self.lookup(parent, expression, visited) if parent else Resolution()
+            return self.lookup(parent, expression, visited)
         return Resolution()
 
     def package_binding(

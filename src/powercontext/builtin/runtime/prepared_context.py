@@ -33,7 +33,6 @@ from powercontext.builtin.runtime.prepared_code import (
     CodeEvidenceRef,
     PreparedCodeCandidate,
     assemble_code,
-    historical_request,
 )
 from powercontext.builtin.runtime.prepared_text import (
     TRUST_POLICY,
@@ -157,6 +156,7 @@ class PreparedContextBuilder:
     topic_memory_entry_limit = 8
     experience_entry_limit = 2
     max_entry_content_bytes = 2000
+    _text_entry_limit: int | None = None
 
     def empty(self) -> PreparedContext:
         return PreparedContext(status="empty", content=None, content_bytes=0)
@@ -216,8 +216,9 @@ class PreparedContextBuilder:
             def historical(history_request: PrepareContextRequest, entries: int) -> PreparedContextBuild:
                 builder = PreparedContextBuilder()
                 builder.entry_limit = entries
+                builder._text_entry_limit = entries if entries < self.entry_limit else None
                 return builder.build_scopes_result(
-                    request=historical_request(history_request, entries),
+                    request=history_request.model_copy(update={"include_code": False}),
                     current_scope_id=current_scope_id,
                     memory_candidates=memory_candidates,
                     topic_memory_hits=topic_memory_hits,
@@ -365,6 +366,12 @@ class PreparedContextBuilder:
         dropped_below_min_bytes = 0
         dropped_no_fitting_truncation = 0
         for section in assembly.sections:
+            # Unfilled earlier sections leave their capacity available to later ones.
+            limit = (
+                section.limit
+                if self._text_entry_limit is None
+                else min(section.limit, self._text_entry_limit - len(included))
+            )
             if section.family == "profile":
                 entries = self._profile_entries(profile_candidates)
             elif section.family == "topic-memory":
@@ -389,6 +396,8 @@ class PreparedContextBuilder:
             rank = 0
             selected_count = 0
             for entry in entries:
+                if selected_count >= limit:
+                    break
                 item = _text_item(entry)
                 artifact = item.artifact
                 identity = (
@@ -413,8 +422,6 @@ class PreparedContextBuilder:
                 origins.append(entry.origin)
                 selected_count += 1
                 truncated_items += int(fitted.truncated)
-                if selected_count >= section.limit:
-                    break
         omissions = PreparedContextOmissions(
             truncated_items=truncated_items,
             dropped_items=dropped_below_min_bytes + dropped_no_fitting_truncation,

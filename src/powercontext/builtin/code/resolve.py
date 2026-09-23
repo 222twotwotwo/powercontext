@@ -18,7 +18,7 @@ from typing import Any
 
 from powercontext.builtin.code.capture import check_deadline
 
-RESOLVER_BUILD = "python-static-3"
+RESOLVER_BUILD = "python-static-4"
 
 
 @dataclass(frozen=True)
@@ -159,6 +159,10 @@ class PythonResolver:
             result = self.import_target(binding, file_id, visited, suffix=parts[1:])
         else:
             return self.local_target(scope, binding, parts, visited)
+        # A star import can overwrite any binding in this namespace. Keep the
+        # uncertainty for lexical lookups and exported module members alike.
+        if self.bindings.get((scope["id"], "*")):
+            return Resolution(result.targets, "candidate", "wildcard_import", "wildcard_import")
         if binding.get("conditional"):
             return Resolution(result.targets, "candidate", "conditional_binding", "conditional_binding")
         return result

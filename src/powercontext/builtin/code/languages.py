@@ -36,8 +36,8 @@ class LanguageSpec:
 
 LANGUAGES = {
     "python": LanguageSpec("tree_sitter_python", "0.25.0", "python-5", (".py", ".pyi")),
-    "javascript": LanguageSpec("tree_sitter_javascript", "0.25.0", "ecmascript-2", (".js", ".jsx", ".mjs", ".cjs")),
-    "typescript": LanguageSpec("tree_sitter_typescript", "0.23.2", "ecmascript-2", (".ts", ".tsx", ".mts", ".cts")),
+    "javascript": LanguageSpec("tree_sitter_javascript", "0.25.0", "ecmascript-3", (".js", ".jsx", ".mjs", ".cjs")),
+    "typescript": LanguageSpec("tree_sitter_typescript", "0.23.2", "ecmascript-3", (".ts", ".tsx", ".mts", ".cts")),
     "go": LanguageSpec("tree_sitter_go", "0.25.0", "go-2", (".go",)),
 }
 SUPPORTED_LANGUAGES = tuple(LANGUAGES)

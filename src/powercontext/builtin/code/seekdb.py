@@ -24,7 +24,7 @@ from typing import Any
 
 import pymysql
 
-from powercontext.builtin.code.cache import read_json
+from powercontext.builtin.code.cache import read_json, read_private
 from powercontext.builtin.code.capture import check_deadline, digest_bytes, json_bytes, write_private
 from powercontext.builtin.code.errors import CodeError
 from powercontext.builtin.code.graph import GraphReader
@@ -246,7 +246,14 @@ class SeekDBGraphStore:
         self.initialize(deadline)
         reference = {"backend": self.identity, "binding": directory.parent.name, "id": uuid.uuid4().hex}
         # Persist the cleanup handle before any database commit can leave orphan rows.
-        write_private(directory / "graph.json", json_bytes(reference))
+        # A killed writer may leave the temporary file incomplete, but remove() must
+        # only see a complete descriptor or no committed database work at all.
+        temporary = directory / ("graph-pending-" + uuid.uuid4().hex)
+        try:
+            write_private(temporary, json_bytes(reference))
+            os.replace(temporary, directory / "graph.json")
+        finally:
+            temporary.unlink(missing_ok=True)
         descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
             os.fsync(descriptor)
@@ -381,7 +388,12 @@ class SeekDBGraphStore:
     def remove(self, directory: Path, deadline: float) -> None:
         if not (directory / "graph.json").exists():
             return
-        reference = self._reference(directory)
+        try:
+            reference = self._reference(directory)
+        except CodeError:
+            if self._incomplete_staging(directory, deadline):
+                return
+            raise
         with self.connection(deadline) as connection, connection.cursor() as cursor:
             for table in ("pc_code_edges", "pc_code_nodes"):
                 check_deadline(deadline)
@@ -391,6 +403,37 @@ class SeekDBGraphStore:
                 (reference["id"], reference["binding"]),
             )
             connection.commit()
+
+    def _incomplete_staging(self, directory: Path, deadline: float) -> bool:
+        # Older builders wrote graph.json in place before opening the transaction.
+        # Recover their interrupted writes without accepting corrupt published graphs
+        # or discarding an unknown committed generation's only cleanup handle.
+        if not directory.name.startswith("staging-") or (directory / "manifest.json").exists():
+            return False
+        try:
+            json.loads(read_private(directory / "graph.json", maximum=4096))
+        except (UnicodeError, ValueError):
+            pass
+        else:
+            return False
+        known = set()
+        for pattern in ("generation-*", "staging-*"):
+            for other in directory.parent.glob(pattern):
+                check_deadline(deadline)
+                if other == directory or other.is_symlink() or not other.is_dir():
+                    continue
+                try:
+                    known.add(self._reference(other)["id"])
+                except CodeError:
+                    continue
+        with self.connection(deadline) as connection:
+            reader = SeekDBGraphReader(connection, "", deadline)
+            return all(
+                row[0] in known
+                for row in reader.rows(
+                    "SELECT id FROM pc_code_generations WHERE binding = %s", (directory.parent.name,)
+                )
+            )
 
     def size(self, directory: Path, deadline: float) -> int:
         with self.connection(deadline) as connection:

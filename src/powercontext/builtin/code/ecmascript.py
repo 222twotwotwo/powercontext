@@ -38,6 +38,22 @@ _TYPES = {
 
 
 class ECMAScriptCollector(SyntaxCollector):
+    def write_pattern(self, node: Node | None, scope: str) -> None:
+        if node is None:
+            return
+        expression = self.expression(node)
+        if node.type == "shorthand_property_identifier_pattern":
+            expression = self.text(node)
+        if expression:
+            self.writes.append({"scope": scope, "expression": expression})
+        elif node.type == "pair_pattern":
+            self.write_pattern(node.child_by_field_name("value"), scope)
+        elif node.type in {"assignment_pattern", "object_assignment_pattern"}:
+            self.write_pattern(node.child_by_field_name("left"), scope)
+        elif node.type in {"object_pattern", "array_pattern", "rest_pattern", "parenthesized_expression"}:
+            for child in node.named_children:
+                self.write_pattern(child, scope)
+
     def bind_pattern(self, node: Node | None, scope: str) -> None:
         if node is None:
             return
@@ -170,8 +186,6 @@ class ECMAScriptCollector(SyntaxCollector):
         if node.type in {"statement_block", "for_statement", "for_in_statement", "catch_clause", "switch_body"}:
             scope = self.scope(node, scope)
             self.bind_pattern(node.child_by_field_name("parameter"), scope)
-            if node.type == "for_in_statement":
-                self.bind_pattern(node.child_by_field_name("left"), scope)
         self.expression_facts(node, scope)
         if node.type in {"with_statement", "internal_module", "module"}:
             self.issue(node, "unsupported_scope")
@@ -201,6 +215,11 @@ class ECMAScriptCollector(SyntaxCollector):
         return [(body, item["id"])] if body else []
 
     def expression_facts(self, node: Node, scope: str) -> None:
+        if node.type == "for_in_statement":
+            if node.child_by_field_name("kind") is None:
+                self.write_pattern(node.child_by_field_name("left"), scope)
+            else:
+                self.bind_pattern(node.child_by_field_name("left"), scope)
         if node.type in {"field_definition", "public_field_definition"}:
             name = node.child_by_field_name("property") or node.child_by_field_name("name")
             if name is not None:
@@ -209,11 +228,7 @@ class ECMAScriptCollector(SyntaxCollector):
             self.issue(node, "dynamic_class_member")
         if node.type in {"assignment_expression", "augmented_assignment_expression", "update_expression"}:
             target = node.child_by_field_name("left") or node.child_by_field_name("argument")
-            expression = self.expression(target)
-            if expression:
-                self.writes.append({"scope": scope, "expression": expression})
-            else:
-                self.bind_pattern(target, scope)
+            self.write_pattern(target, scope)
         if node.type in {"call_expression", "new_expression"}:
             target = node.child_by_field_name("function") or node.child_by_field_name("constructor")
             if target is not None:

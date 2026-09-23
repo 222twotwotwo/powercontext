@@ -258,6 +258,137 @@ def test_corrupt_rows_are_rejected_and_rebuilt(repository, backend):
     assert symbol(service, "fit", "budget.py")[1]["name"] == "fit"
 
 
+@pytest.mark.parametrize("checkpoint", ("descriptor", "committed"))
+@pytest.mark.parametrize("recovery", ("sync", "index", "clear"))
+def test_interrupted_build_recovers_without_orphan_rows(repository, backend, tmp_path, checkpoint, recovery):
+    _, service = repository
+    database, store = backend
+    before = query(service, "symbols", query="fit")
+    marker = tmp_path / "builder-paused"
+    script = """
+import json
+import os
+import signal
+import sys
+from pathlib import Path
+
+from powercontext.builtin.code import CodeConfig, CodeService
+from powercontext.builtin.code import seekdb
+
+config, database, options, marker, checkpoint = json.loads(sys.argv[1])
+marker = Path(marker)
+
+def pause():
+    marker.touch()
+    signal.pause()
+
+if checkpoint == "descriptor":
+    write_private = seekdb.write_private
+    def interrupted_write(path, content):
+        if path.name.startswith("graph"):
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            os.fsync(descriptor)
+            os.close(descriptor)
+            pause()
+        write_private(path, content)
+    seekdb.write_private = interrupted_write
+else:
+    create = seekdb.SeekDBGraphStore.create
+    def interrupted_create(self, *args):
+        result = create(self, *args)
+        pause()
+        return result
+    seekdb.SeekDBGraphStore.create = interrupted_create
+
+store = seekdb.SeekDBGraphStore(Path(database), options)
+CodeService(CodeConfig.model_validate(config), store=store).index("scope", full=True)
+"""
+    arguments = json.dumps([
+        service.config.model_dump(mode="json"),
+        str(database.path),
+        store.options,
+        str(marker),
+        checkpoint,
+    ])
+    with (tmp_path / "builder.log").open("w+") as log:
+        builder = subprocess.Popen([sys.executable, "-c", script, arguments], stdout=log, stderr=log)
+        try:
+            deadline = time.monotonic() + 45
+            while not marker.exists() and builder.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.02)
+            log.seek(0)
+            assert marker.exists(), log.read()
+        finally:
+            builder.kill()
+            builder.wait(timeout=10)
+    after = query(service, "symbols", query="fit")
+    assert after.fingerprint == before.fingerprint and after.items == before.items
+    result = getattr(service, recovery)("scope")
+    assert result["status"] == ("cleared" if recovery == "clear" else "ready")
+    directory = next(service.config.cache_dir.iterdir())
+    assert not list(directory.glob("staging-*"))
+    references = [json.loads(path.read_text())["id"] for path in directory.glob("generation-*/graph.json")]
+    with store.connection(time.monotonic() + 10) as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT id FROM pc_code_generations WHERE binding = %s", (directory.name,))
+        assert {row[0] for row in cursor.fetchall()} == set(references)
+        for table in ("pc_code_nodes", "pc_code_edges"):
+            cursor.execute(
+                f"SELECT COUNT(*) FROM {table} rows_ LEFT JOIN pc_code_generations generations "  # noqa: S608 - constant tables.
+                "ON generations.id = rows_.generation_id WHERE generations.id IS NULL"
+            )
+            assert cursor.fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("content", (b"", b'{"backend":'))
+@pytest.mark.parametrize("recovery", ("sync", "index", "clear"))
+def test_legacy_incomplete_staging_descriptor_recovers(repository, content, recovery):
+    _, service = repository
+    directory = next(service.config.cache_dir.iterdir())
+    staging = GenerationCache(directory, service.store).staging()
+    (staging / "graph.json").write_bytes(content)
+    result = getattr(service, recovery)("scope")
+    assert result["status"] == ("cleared" if recovery == "clear" else "ready")
+    assert not staging.exists()
+    if recovery != "clear":
+        assert symbol(service, "fit", "budget.py")[1]["name"] == "fit"
+
+
+def test_unknown_committed_staging_generation_preserves_published_index(repository):
+    _, service = repository
+    before = query(service, "symbols", query="fit")
+    directory = next(service.config.cache_dir.iterdir())
+    staging = GenerationCache(directory, service.store).staging()
+    service.store.create(staging, [], [], time.monotonic() + 30)
+    descriptor = staging / "graph.json"
+    original = descriptor.read_bytes()
+    descriptor.write_bytes(b"")
+    try:
+        with pytest.raises(CodeError, match="index_integrity_failed"):
+            service.clear("scope")
+        after = query(service, "symbols", query="fit")
+        assert after.fingerprint == before.fingerprint and after.items == before.items
+        assert staging.exists()
+    finally:
+        descriptor.write_bytes(original)
+
+
+def test_malformed_published_descriptor_is_rejected(repository):
+    _, service = repository
+    directory = next(service.config.cache_dir.iterdir())
+    pointer = json.loads((directory / "current.json").read_text())
+    published = directory / pointer["current"]["directory"]
+    descriptor = published / "graph.json"
+    original = descriptor.read_bytes()
+    descriptor.write_bytes(b"")
+    try:
+        with pytest.raises(CodeError, match="index_integrity_failed"):
+            query(service, "symbols", query="fit")
+        with pytest.raises(CodeError, match="index_integrity_failed"):
+            service.store.remove(published, time.monotonic() + 10)
+    finally:
+        descriptor.write_bytes(original)
+
+
 def test_failed_publication_keeps_old_index_and_retry_cleans_up(repository, monkeypatch):
     root, service = repository
     before = service.status("scope").fingerprint

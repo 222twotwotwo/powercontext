@@ -151,21 +151,6 @@ def _fit(
     return None
 
 
-def historical_request(request: PrepareContextRequest, entry_limit: int) -> PrepareContextRequest:
-    assembly = request.assembly
-    if assembly is not None:
-        sections = []
-        remaining = entry_limit
-        for section in assembly.sections:
-            if remaining <= 0:
-                break
-            count = min(section.limit, remaining)
-            sections.append(section.model_copy(update={"limit": count}))
-            remaining -= count
-        assembly = assembly.model_copy(update={"sections": tuple(sections)})
-    return request.model_copy(update={"include_code": False, "assembly": assembly})
-
-
 def assemble_code(
     request: PrepareContextRequest,
     candidates: Sequence[PreparedCodeCandidate],

@@ -882,6 +882,26 @@ def test_code_only_prepare_and_unavailable_code_preserve_empty_contract() -> Non
     assert empty.context.content_bytes == 0
 
 
+@pytest.mark.parametrize("memory_count", [0, 1, 3, 6])
+def test_code_context_counts_selected_history_instead_of_section_capacity(memory_count: int) -> None:
+    result = PreparedContextBuilder().build_scopes_result(
+        request=PrepareContextRequest(query="client", include_code=True, max_bytes=32768, assembly=ContextAssembly()),
+        current_scope_id="scope",
+        code_candidates=_code_candidates(4),
+        memory_candidates=(
+            PreparedMemoryCandidates(
+                "scope", MEMORY_REF, tuple(_hit(str(i), f"History {i}") for i in range(memory_count))
+            ),
+        ),
+        experience_candidates=(PreparedExperienceCandidates("scope", (_experience_hit(), _experience_hit("second"))),),
+    )
+    assert len(result.code_origins) == 4
+    assert len(result.origins) == min(memory_count + 2, 4)
+    assert result.context.content is not None
+    assert ("## Experience" in result.context.content) is (memory_count < 4)
+    assert result.context.content_bytes <= 32768
+
+
 def test_code_off_is_identical_and_degradation_returns_history_budget() -> None:
     builder = PreparedContextBuilder()
     memory = (PreparedMemoryCandidates("scope", MEMORY_REF, (_hit("history", "Important constraint " * 80),)),)
@@ -894,6 +914,30 @@ def test_code_off_is_identical_and_degradation_returns_history_budget() -> None:
         request=request.model_copy(update={"include_code": True}), current_scope_id="scope", memory_candidates=memory
     )
     assert baseline == disabled == degraded
+
+
+def test_unavailable_code_preserves_explicit_history_section_limits() -> None:
+    builder = PreparedContextBuilder()
+    request = PrepareContextRequest(
+        query="client",
+        max_bytes=32768,
+        assembly=ContextAssembly.model_validate({
+            "sections": [{"family": "memory", "limit": 8}, {"family": "experience", "limit": 2}]
+        }),
+    )
+    memory = (PreparedMemoryCandidates("scope", MEMORY_REF, tuple(_hit(str(i), "History") for i in range(8))),)
+    experiences = (PreparedExperienceCandidates("scope", (_experience_hit(), _experience_hit("second"))),)
+    baseline = builder.build_scopes_result(
+        request=request, current_scope_id="scope", memory_candidates=memory, experience_candidates=experiences
+    )
+    degraded = builder.build_scopes_result(
+        request=request.model_copy(update={"include_code": True}),
+        current_scope_id="scope",
+        memory_candidates=memory,
+        experience_candidates=experiences,
+    )
+    assert len(baseline.origins) == 10
+    assert degraded == baseline
 
 
 @pytest.mark.parametrize("value", ["true", 1, None])

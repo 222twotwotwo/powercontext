@@ -254,6 +254,11 @@ class GenerationCache:
     def clear(self, deadline: float) -> dict[str, Any]:
         self.initialize()
         with file_lock(self.directory / "build.lock", deadline), file_lock(self.directory / "publish.lock", deadline):
+            # Failed abandoned-build cleanup must not unpublish a usable generation.
+            for path in self.directory.glob("staging-*"):
+                if path.is_dir() and not path.is_symlink():
+                    self.store.remove(path, deadline)
+                    shutil.rmtree(path)
             # Keep lock inodes stable: removing the binding directory would let a
             # concurrent process acquire a different lock for this same binding.
             for name in ("current.json", "last-build.json"):
@@ -264,10 +269,6 @@ class GenerationCache:
             finally:
                 os.close(descriptor)
             self.collect(None, deadline)
-            for path in self.directory.glob("staging-*"):
-                if path.is_dir() and not path.is_symlink():
-                    self.store.remove(path, deadline)
-                    shutil.rmtree(path)
             retained = sum(path.is_dir() and not path.is_symlink() for path in self.directory.glob("generation-*"))
             return {"status": "cleared", "retained_reader_generations": retained}
 
