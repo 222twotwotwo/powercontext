@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import subprocess
 
@@ -27,6 +28,10 @@ from powercontext.server.settings import ServerSettings
 
 for grammar in ("tree_sitter_javascript", "tree_sitter_typescript", "tree_sitter_go"):
     pytest.importorskip(grammar)
+
+pytestmark = pytest.mark.skipif(
+    os.name != "posix", reason="native code indexing requires POSIX file locks and resource limits"
+)
 
 
 def test_prepare_uses_each_language_and_drops_stale_code(tmp_path):

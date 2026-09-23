@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 
@@ -20,6 +21,10 @@ from powercontext.builtin.code import CodeConfig, CodeError, CodeQueryRequest, C
 
 for grammar in ("tree_sitter_python", "tree_sitter_javascript", "tree_sitter_typescript", "tree_sitter_go"):
     pytest.importorskip(grammar)
+
+pytestmark = pytest.mark.skipif(
+    os.name != "posix", reason="native code indexing requires POSIX file locks and resource limits"
+)
 
 
 def git(root, *arguments):

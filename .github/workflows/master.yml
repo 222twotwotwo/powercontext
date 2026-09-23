@@ -107,6 +107,13 @@ jobs:
       - name: Verify spawned worker lifecycle on Windows
         run: uv run --locked --no-sync pytest -q tests/builtin/runtime/test_artifact_processing.py
 
+      - name: Verify unsupported native indexing is skipped on Windows
+        run: >-
+          uv run --locked --no-sync pytest -q
+          tests/builtin/test_native_code.py
+          tests/builtin/test_native_code_multilanguage.py
+          tests/e2e/test_native_code_multilanguage.py
+
       - name: Exercise fixtures without Windows long-path support
         shell: pwsh
         run: |

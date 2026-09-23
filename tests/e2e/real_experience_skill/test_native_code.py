@@ -43,7 +43,10 @@ from powercontext.server.settings import McpConfig, MetricsConfig
 
 from .harness import _configured_access_token, _start_configured_server, _without_scheduled_processing
 
-pytestmark = pytest.mark.real_e2e
+pytestmark = [
+    pytest.mark.real_e2e,
+    pytest.mark.skipif(os.name != "posix", reason="native code indexing requires POSIX file locks and resource limits"),
+]
 ROOT = Path(__file__).resolve().parents[3]
 
 

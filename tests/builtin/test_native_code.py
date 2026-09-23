@@ -31,6 +31,10 @@ from powercontext.builtin.code import (
 pytest.importorskip("tree_sitter")
 pytest.importorskip("tree_sitter_python")
 
+pytestmark = pytest.mark.skipif(
+    os.name != "posix", reason="native code indexing requires POSIX file locks and resource limits"
+)
+
 
 def test_index_closes_its_database_before_returning(repository):
     import gc
@@ -371,7 +375,10 @@ def test_same_size_and_mtime_edit_is_stale_then_syncs(repository):
     before = path.stat()
     path.write_bytes(path.read_bytes().replace(b"trim(value)", b"trim(None )"))
     os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
-    assert service.status("scope").status == "stale"
+    status = service.status("scope")
+    assert status.status == "stale"
+    assert status.freshness == "stale"
+    assert status.fingerprint == fingerprint
     with pytest.raises(CodeError, match="code_changed"):
         query(service, "callees", expected=fingerprint, symbol_id=symbol["id"])
     update = service.sync("scope")
@@ -1015,6 +1022,32 @@ def test_failed_rebuild_preserves_published_generation(repository):
     assert status.freshness == "fresh"
     assert status.last_build is not None
     assert status.last_build["status"] == "failed"
+
+
+@pytest.mark.parametrize("progress", ["unexpected output", "begin:not-an-index"])
+def test_malformed_parser_progress_reports_parser_failure(repository, monkeypatch, progress):
+    import sys
+
+    from powercontext.builtin.code import process
+
+    _, service = repository
+    before = service.status("scope").fingerprint
+    popen = subprocess.Popen
+
+    def malformed_worker(arguments, **kwargs):
+        # Keep Git processes intact and replace only the parser's stdout producer.
+        if arguments[1:3] == ["-m", "powercontext.builtin.code.worker"]:
+            arguments = [sys.executable, "-c", f"print({progress!r}, flush=True)"]
+        return popen(arguments, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(process.subprocess, "Popen", malformed_worker)
+        with pytest.raises(CodeError, match="code_parser_failed"):
+            service.index("scope", full=True)
+    status = service.status("scope")
+    assert status.status == "ready"
+    assert status.fingerprint == before
+    assert status.last_build["reason"] == "code_parser_failed"
 
 
 def test_fifo_cache_corruption_fails_without_blocking(repository):

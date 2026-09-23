@@ -188,7 +188,7 @@ POWERCONTEXT_CLAUDE_REQUEST_TIMEOUT_SECONDS=6
 POWERCONTEXT_CLAUDE_HTTP_BUDGET_SECONDS=8
 ```
 
-Hooks default to a one-second request timeout and a four-second HTTP budget; code queries on larger repositories can exceed that request timeout.
+Hooks default to a three-second request timeout and a six-second HTTP budget; code queries on larger repositories can exceed that request timeout.
 The example allows room for the default five-second code-query limit and leaves process overhead within the plugins' ten-second Hook deadline.
 The total budget also covers Scope resolution and other HTTP operations. Verify it against deployment latency; an earlier network or host timeout can prevent delivery of the entire context.
 

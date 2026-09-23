@@ -8452,6 +8452,8 @@ components:
       - kind
       type: object
     CodeMapOperation:
+      x-powercontext-code-validation: operation
+      description: path_prefix is empty or a normalized repository-relative path, without dot segments, backslashes, colons or NUL.
       additionalProperties: false
       properties:
         path_prefix:
@@ -8475,6 +8477,10 @@ components:
       - kind
       type: object
     CodeReadOperation:
+      x-powercontext-code-validation: operation
+      description: >-
+        Read a normalized repository-relative path without dot segments, backslashes, colons or NUL.
+        The inclusive range must contain 1 to 200 lines (start_line <= end_line < start_line + 200).
       additionalProperties: false
       properties:
         kind:
@@ -8500,6 +8506,8 @@ components:
       - end_line
       type: object
     CodeRelationOperation:
+      x-powercontext-code-validation: operation
+      description: path_prefix is empty or a normalized repository-relative path, without dot segments, backslashes, colons or NUL.
       additionalProperties: false
       properties:
         path_prefix:
@@ -8530,6 +8538,10 @@ components:
       - symbol_id
       type: object
     CodeSearchOperation:
+      x-powercontext-code-validation: operation
+      description: >-
+        query must contain non-whitespace text. path_prefix is empty or a normalized repository-relative path,
+        without dot segments, backslashes, colons or NUL.
       additionalProperties: false
       properties:
         path_prefix:
@@ -8564,6 +8576,10 @@ components:
       - kind
       type: object
     CodeTestsOperation:
+      x-powercontext-code-validation: operation
+      description: >-
+        paths must be unique normalized repository-relative paths, without dot segments, backslashes, colons or NUL.
+        path_prefix follows the same rules but may be empty.
       additionalProperties: false
       properties:
         path_prefix:
@@ -8590,6 +8606,10 @@ components:
       - paths
       type: object
     CodeQueryRequest:
+      x-powercontext-code-validation: query
+      description: >-
+        callers, callees, impact, affected_tests, impact_changes and read require expected_fingerprint.
+        impact_changes also requires before_fingerprint; other operations must omit it or set it to null.
       additionalProperties: false
       properties:
         operation:

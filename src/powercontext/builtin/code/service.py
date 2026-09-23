@@ -345,10 +345,12 @@ class CodeService:
             raise
         deadline = time.monotonic() + self.config.limits.query_seconds
         last_build = None
+        fingerprint = None
         try:
             if (cache.directory / "last-build.json").exists():
                 last_build = read_json(cache.directory / "last-build.json")
             with cache.pin(deadline) as (generation, _):
+                fingerprint = generation.fingerprint
                 self._verify(repository, generation, deadline)
                 return CodeStatus(
                     scope_id=scope_id,
@@ -366,6 +368,7 @@ class CodeService:
                 scope_id=scope_id,
                 status=state,
                 freshness="stale" if state == "stale" else "unknown",
+                fingerprint=fingerprint,
                 last_build=last_build,
                 reason=reason,
             )

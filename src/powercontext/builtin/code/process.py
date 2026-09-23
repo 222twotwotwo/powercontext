@@ -25,8 +25,11 @@ from powercontext.builtin.code.extract import text_facts
 
 
 def _progress(line: bytes, count: int) -> tuple[bytes, int]:
-    action, number = line.split(b":", 1)
-    index = int(number)
+    try:
+        action, number = line.split(b":", 1)
+        index = int(number)
+    except ValueError as error:
+        raise CodeError("code_parser_failed") from error
     if not 0 <= index < count:
         raise CodeError("code_parser_failed")
     return action, index

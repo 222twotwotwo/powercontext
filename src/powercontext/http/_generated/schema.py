@@ -7586,6 +7586,11 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                 "additionalProperties": False,
                 "type": "object",
                 "required": ["kind"],
+                "description": "path_prefix is empty or a "
+                "normalized repository-relative "
+                "path, without dot segments, "
+                "backslashes, colons or NUL.",
+                "x-powercontext-code-validation": "operation",
             },
             "CodeReadOperation": {
                 "properties": {
@@ -7598,6 +7603,14 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                 "additionalProperties": False,
                 "type": "object",
                 "required": ["kind", "path", "file_sha256", "start_line", "end_line"],
+                "description": "Read a normalized "
+                "repository-relative path without "
+                "dot segments, backslashes, "
+                "colons or NUL. The inclusive "
+                "range must contain 1 to 200 "
+                "lines (start_line <= end_line < "
+                "start_line + 200).",
+                "x-powercontext-code-validation": "operation",
             },
             "CodeRelationOperation": {
                 "properties": {
@@ -7610,6 +7623,12 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                 "additionalProperties": False,
                 "type": "object",
                 "required": ["kind", "symbol_id"],
+                "description": "path_prefix is empty or a "
+                "normalized "
+                "repository-relative path, "
+                "without dot segments, "
+                "backslashes, colons or NUL.",
+                "x-powercontext-code-validation": "operation",
             },
             "CodeSearchOperation": {
                 "properties": {
@@ -7621,6 +7640,13 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                 "additionalProperties": False,
                 "type": "object",
                 "required": ["kind", "query"],
+                "description": "query must contain "
+                "non-whitespace text. "
+                "path_prefix is empty or a "
+                "normalized repository-relative "
+                "path, without dot segments, "
+                "backslashes, colons or NUL.",
+                "x-powercontext-code-validation": "operation",
             },
             "CodeStatusOperation": {
                 "properties": {"kind": {"type": "string", "enum": ["status"]}},
@@ -7638,6 +7664,13 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                 "additionalProperties": False,
                 "type": "object",
                 "required": ["kind", "paths"],
+                "description": "paths must be unique normalized "
+                "repository-relative paths, "
+                "without dot segments, "
+                "backslashes, colons or NUL. "
+                "path_prefix follows the same "
+                "rules but may be empty.",
+                "x-powercontext-code-validation": "operation",
             },
             "CodeQueryRequest": {
                 "properties": {
@@ -7702,6 +7735,15 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                 "additionalProperties": False,
                 "type": "object",
                 "required": ["operation"],
+                "description": "callers, callees, impact, "
+                "affected_tests, impact_changes "
+                "and read require "
+                "expected_fingerprint. "
+                "impact_changes also requires "
+                "before_fingerprint; other "
+                "operations must omit it or set it "
+                "to null.",
+                "x-powercontext-code-validation": "query",
             },
             "CodeQueryResult": {
                 "properties": {

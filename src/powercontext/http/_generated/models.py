@@ -1432,6 +1432,13 @@ class CodeMapOperation(BaseModel):
     kind: Literal["map"]
     depth: Annotated[StrictInt, Field(ge=1, le=5)] = 2
 
+    @model_validator(mode="after")
+    def _validate_code_operation(self):
+        from powercontext._code_validation import validate_code_operation
+
+        validate_code_operation(self.model_dump())
+        return self
+
 
 class Kind5(StrEnum):
     READ = "read"
@@ -1446,6 +1453,13 @@ class CodeReadOperation(BaseModel):
     file_sha256: Annotated[StrictStr, Field(pattern="^[0-9a-f]{64}$")]
     start_line: Annotated[StrictInt, Field(ge=1)]
     end_line: Annotated[StrictInt, Field(ge=1)]
+
+    @model_validator(mode="after")
+    def _validate_code_operation(self):
+        from powercontext._code_validation import validate_code_operation
+
+        validate_code_operation(self.model_dump())
+        return self
 
 
 class Kind6(StrEnum):
@@ -1464,6 +1478,13 @@ class CodeRelationOperation(BaseModel):
     symbol_id: Annotated[StrictStr, Field(max_length=128, min_length=1)]
     depth: Annotated[StrictInt, Field(ge=1, le=5)] = 2
 
+    @model_validator(mode="after")
+    def _validate_code_operation(self):
+        from powercontext._code_validation import validate_code_operation
+
+        validate_code_operation(self.model_dump())
+        return self
+
 
 class Kind7(StrEnum):
     SYMBOLS = "symbols"
@@ -1478,6 +1499,13 @@ class CodeSearchOperation(BaseModel):
     limit: Annotated[StrictInt, Field(ge=1, le=50)] = 20
     kind: Literal["symbols", "explore"]
     query: Annotated[StrictStr, Field(max_length=8192, min_length=1)]
+
+    @model_validator(mode="after")
+    def _validate_code_operation(self):
+        from powercontext._code_validation import validate_code_operation
+
+        validate_code_operation(self.model_dump())
+        return self
 
 
 class Kind8(StrEnum):
@@ -1505,6 +1533,13 @@ class CodeTestsOperation(BaseModel):
     kind: Literal["affected_tests", "impact_changes"]
     paths: Annotated[list[StrictStr], Field(max_length=100, min_length=1)]
 
+    @model_validator(mode="after")
+    def _validate_code_operation(self):
+        from powercontext._code_validation import validate_code_operation
+
+        validate_code_operation(self.model_dump())
+        return self
+
 
 class CodeQueryRequest(BaseModel):
     model_config = ConfigDict(
@@ -1526,6 +1561,13 @@ class CodeQueryRequest(BaseModel):
     expected_fingerprint: Annotated[StrictStr | None, Field(pattern="^[0-9a-f]{64}$")] = None
     before_fingerprint: Annotated[StrictStr | None, Field(pattern="^[0-9a-f]{64}$")] = None
     max_bytes: Annotated[StrictInt, Field(ge=512, le=32768)] = 16000
+
+    @model_validator(mode="after")
+    def _validate_code_query(self):
+        from powercontext._code_validation import validate_code_query
+
+        validate_code_query(self.operation.kind, self.expected_fingerprint, self.before_fingerprint)
+        return self
 
 
 class Schema4(StrEnum):

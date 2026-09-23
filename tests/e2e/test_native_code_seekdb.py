@@ -47,6 +47,10 @@ pytest.importorskip("pylibseekdb")
 for grammar in ("tree_sitter_python", "tree_sitter_javascript", "tree_sitter_typescript", "tree_sitter_go"):
     pytest.importorskip(grammar)
 
+pytestmark = pytest.mark.skipif(
+    os.name != "posix", reason="native code indexing requires POSIX file locks and resource limits"
+)
+
 FILES = {
     "budget.py": 'def fit(value):\n    """Calculate billing allowance."""\n    return value\n',
     "api.py": "from budget import fit\ndef prepare(value):\n    return fit(value)\n",

@@ -180,7 +180,7 @@ POWERCONTEXT_CLAUDE_REQUEST_TIMEOUT_SECONDS=6
 POWERCONTEXT_CLAUDE_HTTP_BUDGET_SECONDS=8
 ```
 
-Hook 原有请求超时默认是 1 秒，HTTP 总预算是 4 秒；较大仓库的代码查询可能超过请求超时。
+Hook 请求超时默认是 3 秒，HTTP 总预算是 6 秒；较大仓库的代码查询可能超过请求超时。
 以上示例为默认最多 5 秒的代码查询留出请求余量，同时在插件配置的 10 秒 Hook 截止时间内预留进程开销。
 总预算还包括 Scope 解析和其他 HTTP 操作，应按实际部署时延验证；网络或宿主先行超时时，本次上下文可能无法交付。
 

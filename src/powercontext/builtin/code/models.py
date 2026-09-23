@@ -11,32 +11,15 @@
 
 from __future__ import annotations
 
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints, field_validator, model_validator
 
+from powercontext._code_validation import relative_path, validate_code_operation, validate_code_query
 from powercontext.builtin.code.languages import SUPPORTED_LANGUAGES
 
 Fingerprint = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
-
-
-def relative_path(value: str, *, allow_root: bool = False) -> str:
-    """Validate a losslessly represented repository-relative path."""
-    if allow_root and value == "":
-        return value
-    parts = value.split("/")
-    if (
-        not value
-        or any(part in {"", ".", ".."} for part in parts)
-        or "\\" in value
-        or ":" in value
-        or "\x00" in value
-        or PurePosixPath(value).is_absolute()
-        or any(0xD800 <= ord(character) <= 0xDFFF for character in value)
-    ):
-        raise ValueError("invalid repository-relative path")  # noqa: TRY003
-    return value
 
 
 class CodeModel(BaseModel):
@@ -104,10 +87,10 @@ class PathOperation(CodeModel):
     path_prefix: str = ""
     limit: int = Field(default=20, ge=1, le=50, strict=True)
 
-    @field_validator("path_prefix")
-    @classmethod
-    def validate_prefix(cls, value: str) -> str:
-        return relative_path(value, allow_root=True)
+    @model_validator(mode="after")
+    def validate_operation(self) -> Self:
+        validate_code_operation(self.model_dump())
+        return self
 
 
 class MapOperation(PathOperation):
@@ -118,13 +101,6 @@ class MapOperation(PathOperation):
 class SearchOperation(PathOperation):
     kind: Literal["symbols", "explore"]
     query: str = Field(min_length=1, max_length=8192, strict=True)
-
-    @field_validator("query")
-    @classmethod
-    def nonblank_query(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("query must not be blank")  # noqa: TRY003
-        return value
 
 
 class RelationOperation(PathOperation):
@@ -137,15 +113,6 @@ class TestsOperation(PathOperation):
     kind: Literal["affected_tests", "impact_changes"]
     paths: tuple[str, ...] = Field(min_length=1, max_length=100)
 
-    @field_validator("paths")
-    @classmethod
-    def validate_paths(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        for item in value:
-            relative_path(item)
-        if len(set(value)) != len(value):
-            raise ValueError("paths must be unique")  # noqa: TRY003
-        return value
-
 
 class ReadOperation(CodeModel):
     kind: Literal["read"]
@@ -154,15 +121,9 @@ class ReadOperation(CodeModel):
     start_line: int = Field(ge=1, strict=True)
     end_line: int = Field(ge=1, strict=True)
 
-    @field_validator("path")
-    @classmethod
-    def validate_path(cls, value: str) -> str:
-        return relative_path(value)
-
     @model_validator(mode="after")
-    def bounded_range(self) -> Self:
-        if not 0 <= self.end_line - self.start_line < 200:
-            raise ValueError("read range must contain 1 to 200 lines")  # noqa: TRY003
+    def validate_operation(self) -> Self:
+        validate_code_operation(self.model_dump())
         return self
 
 
@@ -186,16 +147,7 @@ class CodeQueryRequest(CodeModel):
 
     @model_validator(mode="after")
     def require_identity(self) -> Self:
-        if (
-            isinstance(self.operation, (RelationOperation, TestsOperation, ReadOperation))
-            and not self.expected_fingerprint
-        ):
-            raise ValueError("expected_fingerprint is required for this operation")  # noqa: TRY003
-        if self.operation.kind == "impact_changes":
-            if not self.before_fingerprint:
-                raise ValueError("before_fingerprint is required for impact_changes")  # noqa: TRY003
-        elif self.before_fingerprint is not None:
-            raise ValueError("before_fingerprint is only valid for impact_changes")  # noqa: TRY003
+        validate_code_query(self.operation.kind, self.expected_fingerprint, self.before_fingerprint)
         return self
 
 
