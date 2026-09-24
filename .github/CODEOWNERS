@@ -44,4 +44,3 @@
 # Governance and ownership.
 /.github/CODEOWNERS @zhanghuidinah @PsiACE
 /GOVERNANCE*.md @zhanghuidinah @PsiACE
-/MAINTAINERS*.md @zhanghuidinah @Teingi
