@@ -293,6 +293,19 @@ def test_history_window_refuses_before_loading_history(database_config, monkeypa
             third = await service.remember(memory=second, entries=(fact(3),), mode="append")
             with pytest.raises(CapabilityNotSupportedError, match="history-window"):
                 await service.revisions(first)
+            assert await service.revisions(first, through_revision=1) == (first,)
+            assert await service.revisions(first, since_revision=1) == (second, third)
+            assert await service.revisions(first, since_revision=1, through_revision=2) == (second,)
+            assert await service.revisions(first, since_revision=3) == ()
+            for bounds in (
+                {"since_revision": -1},
+                {"since_revision": 4},
+                {"through_revision": 0},
+                {"through_revision": 4},
+                {"since_revision": 2, "through_revision": 1},
+            ):
+                with pytest.raises(ValueError):
+                    await service.revisions(first, **bounds)
             loaded = []
             original_get = backend.get
 
@@ -325,6 +338,8 @@ def test_default_history_window_and_explicit_override(database_config):
             for reader in readers:
                 with pytest.raises(CapabilityNotSupportedError, match="history-window"):
                     await reader.revisions(first)
+                assert await reader.revisions(first, through_revision=1) == (first,)
+                assert await reader.revisions(first, since_revision=100) == (current,)
                 assert await reader.get(first) == first
             expanded = MemoryService(backend=backend, max_history_revisions=101)
             history = await expanded.revisions(first)

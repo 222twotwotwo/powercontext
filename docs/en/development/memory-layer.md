@@ -79,6 +79,10 @@ method `await service.capacity(memory)` measures the exact Revision supplied. Re
 `POST /v1/memory/capacity` with `{"scope_id": "project-alpha"}`, or
 `PowerContextClient.get_memory_capacity(GetMemoryCapacityRequest(scope_id="project-alpha"))`.
 A Scope without a Memory returns 404; reading capacity does not create one.
+MCP exposes the same read as `get_memory_capacity`, with read-only and idempotent annotations.
+Tombstone eligibility can load complete manifests across the configured recovery window (10 Revisions by default),
+in addition to reading the target Revision. Read and decode cost scales with their combined size. Use this operation
+for explicit capacity inspection, not frequent polling; it is not a constant-cost counter.
 
 `RuntimeConfig` supplies deployment-wide defaults:
 
@@ -101,14 +105,19 @@ The deterministic priority is bytes, manifest entries, then active entries. HTTP
 `manifest_bytes` includes the complete canonical Revision content, including its changes and reasons.
 
 `forget()` and `organize()` remain available over budget. `reactivate()` checks active-entry growth only.
-Compaction removes aged, untagged inactive entries from the current manifest. Enable it explicitly on `RuntimeConfig`,
-or construct a `MemoryService` with `MemoryCompactionPolicy(enabled=True)`, then preview the operation:
+Compaction removes aged, untagged inactive entries from the current manifest. Set
+`RuntimeConfig(memory_compaction_enabled=True)` when constructing the Runtime to permit explicit in-process commits.
+This flag does not schedule or automatically trigger compaction. Call the scoped Runtime entry point to preview and
+commit, using the preview's Revision to reject a head that has changed:
 
 ```python
-preview = await service.compact(memory, dry_run=True, limit=100)
-result = await service.compact(memory, limit=100)
-memory = result.memory
+scoped = runtime.memory.for_scope(scope_id)
+preview = await scoped.compact(dry_run=True, limit=100)
+result = await scoped.compact(limit=100, expected_revision=preview.memory.revision)
 ```
+
+Direct service callers can construct `MemoryService` with `MemoryCompactionPolicy(enabled=True)` and call
+`service.compact(memory, ...)` against an exact Memory Revision. No HTTP, MCP, or CLI compaction operation is provided.
 
 A preview works while compaction is disabled and writes no Revision. Eligibility counts completed Revision advances:
 an entry deactivated at Revision 2 qualifies at Revision 12 with the default age of 10. Reactivation and a subsequent
@@ -126,9 +135,12 @@ exhaustively enumerate change operations before enabling compaction. Compaction 
 `reclaimed_bytes` is the signed difference between complete canonical contents. New audit records or a long reason
 can outweigh a small directory reduction; subsequent revisions no longer carry those compaction records.
 
-`MemoryService.revisions()` refuses histories longer than `memory_max_history_revisions` with
-`CapabilityNotSupportedError("history-window")` before loading them. Stored history and exact Revision reads remain
-available; results are never silently truncated. The default 100 Revisions can already contain about 400 MiB of
+`MemoryService.revisions(memory, since_revision=0, through_revision=None)` reads the interval
+`(since_revision, through_revision]`, defaulting to the current head as the upper bound. It refuses intervals longer
+than `memory_max_history_revisions` with `CapabilityNotSupportedError("history-window")` before expanding them.
+For example, `through_revision=1` still reads the first Revision of a Memory with more than 100 Revisions, and
+`since_revision=100, through_revision=200` reads its next 100. Results are never silently truncated.
+The default 100 Revisions can already contain about 400 MiB of
 canonical content near the 4 MiB budget, before object overhead. This is a read fan-out bound, not a hard memory limit;
 lowered budgets and relief operations can leave Revisions above the byte budget. Increase the configurable history
 limit only when the caller can afford the complete snapshots. This bound does not paginate `entries()` or `changes()`.

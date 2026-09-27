@@ -305,7 +305,7 @@ Both paths call one helper:
 
 ```python
 def _require_capacity(
-    self, base: Memory | None, content: MemoryContent, *, growth: frozenset[str], content_bytes: bytes
+    self, base: Memory | None, content: MemoryContent, *, growth: frozenset[MemoryCapacityDimension], content_bytes: bytes
 ) -> None:
     """Refuse a prepared Revision that grows a dimension past its budget."""
 ```
@@ -415,22 +415,38 @@ Memory-identity validation of the existing `/v1/memory/entries/list` handler. Th
 specify it in `openapi/powercontext.yaml`, regenerate, and add a contract test. The service-level `capacity()` is what
 SDK callers use directly. The route requires `scope.read` and returns 404 if the Scope has no Memory; it never creates
 a Memory or fabricates a reference to report zeros. Python HTTP callers use `PowerContextClient.get_memory_capacity()`.
+The scoped Runtime exposes `capacity()`, and Server MCP exposes `get_memory_capacity` with read-only and idempotent
+annotations. The `server-mcp` capability manifest classifies it as `memory_read`.
+
+Eligibility is not a constant-cost counter: besides reading the target Revision, it can load complete manifests for
+up to `memory_compaction_min_tombstone_revisions` recent Revisions (10 by default). Read and decode cost scales with
+their combined size. The operation description states this cost so callers use it for explicit inspection rather
+than frequent polling. This RFC does not add a changes-only storage projection or deduplicate exact-revision reads.
 
 Compaction is deliberately **not** exposed over HTTP in this RFC. It is a maintenance operation whose authorization
 model belongs with the broader retention policy in #1425; exposing it as an unauthenticated-by-default Server route
-ahead of that design would be the wrong order. SDK and in-process runtime callers can invoke it today.
+ahead of that design would be the wrong order. In-process callers use
+`runtime.memory.for_scope(scope_id).compact(dry_run=False, limit=None, reason=None, expected_revision=None)`.
+The Runtime serializes scoped writes and delegates eligibility and commit rules to `MemoryService.compact()`.
+`memory_compaction_enabled=True` permits these explicit commits; it does not schedule or trigger compaction.
+Previews work while disabled. Passing `expected_revision=preview.memory.revision` rejects a changed head before
+committing. Direct service callers pass an exact Memory Revision and a configured `MemoryCompactionPolicy`.
+No HTTP, MCP, or CLI compaction operation is provided.
 
 ## Revision history bounding
 
 This RFC does not delete or bound stored Revisions. Deleting history would break lineage, exact citations, and Handoff
 verification, and physical erasure is #1425's boundary.
 
-It does bound one unbounded *read*. `MemoryService.revisions()` loads every Revision from 1 to the head in a loop, one
-backend `get()` each, so a Memory with 1,000 Revisions issues 1,000 loads for a single call. This RFC caps that fan-out
-with `max_history_revisions` (default 100) and raises `CapabilityNotSupportedError("history-window")` before loading the
-history past the cap, which the existing mapping already turns into a 422 naming the capability. The cursor-based
-replacement is #1657's deliverable, and this cap is the explicit bound #1656's acceptance criteria asks callers to agree
-on rather than discover.
+`MemoryService.revisions(memory, since_revision=0, through_revision=None)` reads the interval
+`(since_revision, through_revision]` in ascending order, defaulting to the current head as the upper bound.
+`since_revision` must be nonnegative, `through_revision` must be between 1 and the current head, and the lower bound
+must not exceed the upper bound. Equal bounds return an empty tuple. The expansion count is
+`through_revision - since_revision`; it must not exceed `max_history_revisions` (default 100). Oversized requests raise
+`CapabilityNotSupportedError("history-window")` before expanding history. Thus a Memory with 1,000 Revisions remains
+readable in explicit bounded intervals without raising the deployment limit: `through_revision=1` reads its first
+Revision, and `since_revision=900` reads its last 100. Calling without bounds still requests the whole visible history.
+The cursor-based replacement remains #1657's deliverable; this API defines no cursor.
 
 The result is never silently truncated. At 4 MiB per Revision, 1,000 snapshots approach 4 GiB before Python object
 overhead; even 100 approach 400 MiB. The limit bounds read fan-out, not process memory: relief operations and lowered
@@ -468,11 +484,14 @@ configured, OceanBase:
 - Tombstone age and reactivation resets, tag protection, and rollback when a candidate gains a tag before commit.
 - A full Memory recovering immediately with explicit age zero while active and tagged entries remain protected.
 - Signed `reclaimed_bytes` when audit reasons outweigh removed pointers, and zero bytes for no-op compaction.
-- History reads succeeding at 100 Revisions, refusing at 101 before expansion, and explicit configuration overrides.
+- History intervals succeeding at 100 Revisions, refusing at 101 before expansion, bounded reads of longer histories,
+  invalid interval rejection, and explicit configuration overrides.
 
 `tests/e2e/test_memory_capacity.py` covers the HTTP and client contract, including 404 for a Scope without Memory,
-409 on explicit and generic writes, and read authorization. `tests/test_api_contract.py` verifies the operation and
-additive `compact` enum value.
+409 on explicit and generic writes, and read authorization. It also covers the scoped Runtime compaction entry point:
+disabled commits, previews, expected-head conflicts, recovered capacity, audit changes, and historical citations.
+`tests/e2e/test_mcp_transport.py` verifies the capacity tool's read-only annotation and equality with HTTP results
+through the MCP transport. `tests/test_api_contract.py` verifies the operation and additive `compact` enum value.
 
 ### Regression guard
 
@@ -603,8 +622,8 @@ them.
 
 # Unresolved questions
 
-- **Deployment calibration.** The defaults remain 5,000 / 10,000 / 4 MiB. Isolated latency measurements are still
-  needed to recommend tighter budgets for particular workloads.
+- **Deployment calibration.** The defaults remain 5,000 / 10,000 / 4 MiB. OceanBase scale measurements and isolated
+  latency measurements are still needed to recommend tighter budgets for particular workloads.
 - **Should compaction ever be automatic?** This RFC makes it explicit and operator-driven. Whether a scheduled
   compaction below a headroom threshold is safe depends on the authorization and dry-run model in #1425.
 - **What is the recovery path for a compacted entry?** Today: none through `reactivate()`. Whether a `restore`

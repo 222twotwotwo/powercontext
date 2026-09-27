@@ -77,6 +77,9 @@ expected revision 和 citation 保留 optimistic concurrency，调用方无需�
 远程调用使用 `POST /v1/memory/capacity`，请求体为 `{"scope_id": "project-alpha"}`；Python 客户端提供
 `PowerContextClient.get_memory_capacity(GetMemoryCapacityRequest(scope_id="project-alpha"))`。
 Scope 尚无 Memory 时返回 404，查询不会创建 Memory。
+MCP 通过 `get_memory_capacity` 暴露相同的查询，并标记为只读、幂等。
+墓碑资格检查除了读取目标版本，还可能加载配置的保留窗口内的完整清单（默认 10 个版本）；读取与解码开销随这些
+清单的总大小增长。这不是固定开销的计数器，适合显式检查容量，不适合频繁轮询。
 
 `RuntimeConfig` 提供以下部署级默认值：
 
@@ -98,14 +101,18 @@ Scope 尚无 Memory 时返回 404，查询不会创建 Memory。
 `manifest_bytes` 计入完整规范化版本内容，包括变更记录及其原因。
 
 超限时仍可执行 `forget()` 和 `organize()`；`reactivate()` 仅检查活跃条目数增长。压缩从当前清单移除达到保留
-年龄且未绑定标签的非活跃条目。通过 `RuntimeConfig` 显式启用，或使用 `MemoryCompactionPolicy(enabled=True)`
-构造 `MemoryService`，执行前先预览：
+年龄且未绑定标签的非活跃条目。构造 Runtime 时设置 `RuntimeConfig(memory_compaction_enabled=True)`，允许显式
+提交进程内压缩。该开关不会调度或自动触发压缩；调用 Scope 的 Runtime 入口预览，再用预览版本提交，避免处理
+已发生变化的 head：
 
 ```python
-preview = await service.compact(memory, dry_run=True, limit=100)
-result = await service.compact(memory, limit=100)
-memory = result.memory
+scoped = runtime.memory.for_scope(scope_id)
+preview = await scoped.compact(dry_run=True, limit=100)
+result = await scoped.compact(limit=100, expected_revision=preview.memory.revision)
 ```
+
+直接使用 service 的调用方可通过 `MemoryCompactionPolicy(enabled=True)` 构造 `MemoryService`，再以精确的
+Memory 版本调用 `service.compact(memory, ...)`。当前没有 HTTP、MCP 或 CLI 压缩操作。
 
 压缩关闭时仍可预览，预览不写入版本。年龄按已推进的版本数计算：默认保留 10 个版本时，在版本 2 停用的条目
 从版本 12 起可压缩。重新激活并再次停用会重置保留窗口。资格检查只读取这一近期窗口。无变化的维护操作不会
@@ -120,8 +127,10 @@ memory = result.memory
 `reclaimed_bytes` 是完整规范化内容的有符号字节差；审计记录或较长原因可能抵消小规模清单缩减，因此该值可能
 为负。后续版本不再携带本次压缩的变更记录。
 
-`MemoryService.revisions()` 在历史超过 `memory_max_history_revisions` 时，在展开历史前抛出
-`CapabilityNotSupportedError("history-window")`，不会静默截断结果；历史内容和精确版本读取仍然保留。
+`MemoryService.revisions(memory, since_revision=0, through_revision=None)` 读取区间
+`(since_revision, through_revision]`，默认以当前 head 为上界。请求区间超过 `memory_max_history_revisions` 时，
+在展开前抛出 `CapabilityNotSupportedError("history-window")`，不会静默截断结果。例如，历史超过 100 个版本时，
+仍可用 `through_revision=1` 读取首个版本，用 `since_revision=100, through_revision=200` 读取后续 100 个版本。
 在接近 4 MiB 字节预算时，默认 100 个版本已可能包含约 400 MiB 规范内容，尚未计入对象开销。这是读取展开次数
 上限，不是内存硬上限；调低预算或执行补救操作后，版本也可能超过字节预算。只有调用方能承担完整快照开销时
 才应提高历史读取上限。这一上限不为 `entries()` 或 `changes()` 提供分页。

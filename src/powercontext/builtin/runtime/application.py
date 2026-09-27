@@ -58,6 +58,7 @@ from powercontext.builtin.artifacts.memory import (
     Memory,
     MemoryCapacity,
     MemoryCitation,
+    MemoryCompactionResult,
     MemoryEntryInput,
     MemoryEntryVersion,
     MemoryHit,
@@ -2467,6 +2468,27 @@ class ScopedMemoryApplication:
             current = await service.head(context.artifacts.memory_artifact_id)
             _validate_memory_identity(context.artifacts.memory_artifact_id, current)
             return await service.capacity(current)
+
+    async def compact(
+        self,
+        *,
+        dry_run: bool = False,
+        limit: int | None = None,
+        reason: str | None = None,
+        expected_revision: int | None = None,
+    ) -> MemoryCompactionResult:
+        """Explicitly compact the Scope's current Memory under the configured policy.
+
+        Enablement permits commits; it does not schedule them. Previews also work
+        while disabled. Pass the preview's revision to reject a changed head.
+        """
+
+        async with self._runtime._context(self.scope_id) as context, self._runtime._locked(self.scope_id):
+            service = context.artifacts.memory
+            current = await service.head(context.artifacts.memory_artifact_id)
+            _validate_memory_identity(context.artifacts.memory_artifact_id, current)
+            _validate_expected_revision(current, expected_revision)
+            return await service.compact(current, dry_run=dry_run, limit=limit, reason=reason)
 
     async def list(self, *, include_inactive: bool = False, tag_filter: TagFilter | None = None) -> MemoryEntriesPage:
         async with self._runtime._context(self.scope_id) as context:

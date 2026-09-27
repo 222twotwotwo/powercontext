@@ -149,6 +149,7 @@ class _InvalidMemoryOperationError(ValueError):
             "search-query": "memory search query must be non-empty text",
             "compaction-limit": "memory compaction limit must be positive",
             "history-limit": "memory history revision limit must be positive",
+            "through-range": "through_revision must be between 1 and the current head Revision",
         }
         super().__init__(messages[code])
 
@@ -214,15 +215,28 @@ class MemoryService:
         canonical = await self.get(memory)
         return await self._backend.latest(canonical.artifact_id)
 
-    async def revisions(self, memory: Memory, /) -> tuple[Memory, ...]:
-        """Return the visible Memory history in ascending Revision order."""
+    async def revisions(
+        self, memory: Memory, /, *, since_revision: int = 0, through_revision: int | None = None
+    ) -> tuple[Memory, ...]:
+        """Return history in ascending order within ``(since_revision, through_revision]``.
+
+        The upper bound defaults to the current head. The history limit applies
+        to the requested interval, and oversized intervals are never truncated.
+        """
 
         canonical = await self.get(memory)
         latest = await self._backend.latest(canonical.artifact_id)
-        if latest.revision > self._max_history_revisions:
+        upper = latest.revision if through_revision is None else through_revision
+        if upper < 1 or upper > latest.revision:
+            raise _InvalidMemoryOperationError("through-range")
+        if since_revision < 0:
+            raise _InvalidMemoryOperationError("since-negative")
+        if since_revision > upper:
+            raise _InvalidMemoryOperationError("since-greater")
+        if upper - since_revision > self._max_history_revisions:
             raise CapabilityNotSupportedError("history-window")
         history = []
-        for revision in range(1, latest.revision + 1):
+        for revision in range(since_revision + 1, upper + 1):
             history.append(
                 await self._backend.get(
                     ArtifactRef(family=Memory.family, artifact_id=canonical.artifact_id, revision=revision)
@@ -236,7 +250,11 @@ class MemoryService:
         return await self._backend.latest(artifact_id)
 
     async def capacity(self, memory: Memory, /) -> MemoryCapacity:
-        """Measure an exact Revision, including eligible tombstones even when compaction is disabled."""
+        """Measure an exact Revision, including eligible tombstones even when compaction is disabled.
+
+        Eligibility can load complete manifests across the tombstone recovery
+        window. Cost scales with their combined size; this is not a cheap counter.
+        """
 
         canonical = await self._canonical_memory(memory)
         values = self._capacity_values(canonical.content)
@@ -269,7 +287,12 @@ class MemoryService:
         }
 
     def _require_capacity(
-        self, base: Memory | None, content: MemoryContent, *, growth: frozenset[str], content_bytes: bytes
+        self,
+        base: Memory | None,
+        content: MemoryContent,
+        *,
+        growth: frozenset[MemoryCapacityDimension],
+        content_bytes: bytes,
     ) -> None:
         if not growth:
             return
@@ -987,7 +1010,7 @@ class MemoryService:
         changes: Sequence[MemoryChange],
         current_by_entry: dict[str, MemoryEntryVersion],
         entry_versions: tuple[MemoryEntryVersion, ...],
-        growth: frozenset[str] = frozenset(),
+        growth: frozenset[MemoryCapacityDimension] = frozenset(),
     ) -> Memory:
         sorted_manifest = tuple(sorted(manifest.values(), key=lambda item: item.entry_id.encode("utf-8")))
         sorted_changes = tuple(sorted(changes, key=lambda change: change.entry_id.encode("utf-8")))
@@ -1346,7 +1369,7 @@ class MemoryService:
         self._require_capacity(
             base,
             content,
-            growth=frozenset({"active_entries", "manifest_entries", "manifest_bytes"}),
+            growth=frozenset(dimension for dimension, _ in self._capacity_limits()),
             content_bytes=content_bytes,
         )
         memory = Memory(

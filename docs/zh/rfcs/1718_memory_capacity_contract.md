@@ -281,7 +281,7 @@ if isinstance(error, MemoryCapacityExceededError):
 
 ```python
 def _require_capacity(
-    self, base: Memory | None, content: MemoryContent, *, growth: frozenset[str], content_bytes: bytes
+    self, base: Memory | None, content: MemoryContent, *, growth: frozenset[MemoryCapacityDimension], content_bytes: bytes
 ) -> None:
     """Refuse a prepared Revision that grows a dimension past its budget."""
 ```
@@ -381,19 +381,33 @@ Revision。
 授权与 Memory 身份校验。这是一个增量 OpenAPI 操作：在 `openapi/powercontext.yaml` 中定义、重新生成、并添加契约
 测试。SDK 调用方直接使用 service 层的 `capacity()`。该路由要求 `scope.read` 权限；Scope 尚无 Memory 时返回 404，
 不会创建 Memory 或虚构引用来返回零值。Python HTTP 客户端使用 `PowerContextClient.get_memory_capacity()`。
+Scope 的 Runtime 提供 `capacity()`，Server MCP 提供带只读、幂等标记的 `get_memory_capacity`，并在
+`server-mcp` 能力清单中将其归为 `memory_read`。
+
+资格判断不是固定开销的计数器：除了读取目标版本，还可能加载最多
+`memory_compaction_min_tombstone_revisions` 个近期版本的完整清单（默认 10 个）。读取与解码开销随这些清单的
+总大小增长。操作描述明确这一成本，供调用方显式检查容量，避免频繁轮询。本 RFC 不增加仅存变更的投影，也不
+合并重复的精确版本读取。
 
 压缩刻意**不**在本 RFC 中通过 HTTP 暴露。它是一个维护操作，其授权模型属于 #1425 的更广保留策略；在那份设计之前
-就把它作为默认无认证的 Server 路由暴露出去顺序是错的。SDK 与进程内 runtime 调用方现在即可调用它。
+就把它作为默认无认证的 Server 路由暴露出去顺序是错的。进程内调用方使用
+`runtime.memory.for_scope(scope_id).compact(dry_run=False, limit=None, reason=None, expected_revision=None)`。
+Runtime 串行执行 Scope 写入，并将资格与提交规则交给 `MemoryService.compact()`。
+`memory_compaction_enabled=True` 只允许这些显式提交，不会调度或触发压缩。关闭时仍可预览；提交时传入
+`expected_revision=preview.memory.revision`，可在 head 变化后拒绝写入。直接使用 service 的调用方传入精确的
+Memory 版本并配置 `MemoryCompactionPolicy`。当前没有 HTTP、MCP 或 CLI 压缩操作。
 
 ## Revision 历史约束
 
 本 RFC 不删除也不限制已存储的 Revision。删除历史会破坏血缘、精确引用和 Handoff 验证，而物理擦除是 #1425 的边界。
 
-它确实约束了一处无界**读取**。`MemoryService.revisions()` 在循环中从 1 加载到 head 的每个 Revision，每次一个后端
-`get()`，因此一个有 1,000 个 Revision 的 Memory 单次调用会发出 1,000 次加载。本 RFC 用 `max_history_revisions`
-为该读放大设上限，默认 100 个 Revision；超限时在展开历史前抛出 `CapabilityNotSupportedError("history-window")`，
-现有映射将其转成指明该 capability 的 422。基于游标的替代方案是 #1657 的交付物，而这个上限正是 #1656 的验收标准所要求的、让调用方事先
-约定而非自行摸索的显式边界。
+`MemoryService.revisions(memory, since_revision=0, through_revision=None)` 按升序读取区间
+`(since_revision, through_revision]`，默认以当前 head 为上界。`since_revision` 必须非负，`through_revision`
+必须在 1 与当前 head 之间，下界不得大于上界；相等时返回空元组。本次展开量为
+`through_revision - since_revision`，不得超过 `max_history_revisions`（默认 100）。超限请求在展开前抛出
+`CapabilityNotSupportedError("history-window")`。因此，含 1,000 个版本的 Memory 仍可按显式有界区间读取，无须
+提高部署上限：`through_revision=1` 读取首个版本，`since_revision=900` 读取最后 100 个版本。不传边界时仍请求
+全部可见历史。基于游标的替代方案由 #1657 负责，此接口不定义游标。
 
 结果不会静默截断。每个 Revision 为 4 MiB 时，1,000 个快照接近 4 GiB，100 个也接近 400 MiB，尚未计入 Python
 对象开销。这是读取展开次数上限，不是进程内存上限：补救操作和调低预算可能使版本超过字节预算。只有调用方能够
@@ -427,10 +441,13 @@ Revision。
 - 墓碑年龄、重新激活后的窗口重置、标签保护，以及提交前新加标签时事务回滚。
 - 满容量 Memory 通过显式零年龄立即恢复，同时保护活跃条目与带标签墓碑。
 - 审计原因超过被移除指针大小时 `reclaimed_bytes` 为负，无变化压缩返回零。
-- 历史读取在 100 个 Revision 时成功，在 101 个时于展开前拒绝，并支持显式配置覆盖。
+- 历史请求区间为 100 个 Revision 时成功，为 101 个时于展开前拒绝；较长历史仍可有界读取，非法区间被拒绝，
+  并支持显式配置覆盖。
 
 `tests/e2e/test_memory_capacity.py` 覆盖 HTTP 与客户端契约，包括 Scope 尚无 Memory 时的 404、显式及通用写入的
-409 和读取权限。`tests/test_api_contract.py` 验证新增操作和 `compact` 枚举值。
+409 和读取权限；同时覆盖 Scope 的 Runtime 压缩入口：默认关闭时拒绝提交、预览、预期 head 冲突、容量恢复、
+审计变更和历史引用。`tests/e2e/test_mcp_transport.py` 通过 MCP 传输验证容量工具的只读标记及其与 HTTP 结果
+一致。`tests/test_api_contract.py` 验证新增操作和 `compact` 枚举值。
 
 ### 回归防护
 
@@ -544,7 +561,8 @@ RFC 决定 manifest 何时可以不再携带它们。
 
 # 未解决问题
 
-- **部署校准。** 默认值保留 5,000 / 10,000 / 4 MiB。仍需隔离的延迟测量，才能针对具体负载推荐更严格的预算。
+- **部署校准。** 默认值保留 5,000 / 10,000 / 4 MiB。仍需 OceanBase 规模测量和隔离的延迟测量，才能针对具体负载
+  推荐更严格的预算。
 - **压缩是否应当自动化？** 本 RFC 让它显式、由运维驱动。低于余量阈值时执行定时压缩是否安全，取决于 #1425 的
   授权与 dry-run 模型。
 - **被压缩 entry 的恢复路径是什么？** 目前通过 `reactivate()` 没有恢复路径。是否值得定义一个把保留的正文作为新

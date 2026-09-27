@@ -1601,7 +1601,16 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                 "including exact canonical content "
                 "bytes and the number of aged, untagged "
                 "tombstones eligible for compaction. "
-                "Returns 404 when no Memory exists.",
+                "Returns 404 when no Memory exists. "
+                "Tombstone eligibility can load "
+                "complete manifests for up to "
+                "memory_compaction_min_tombstone_revisions "
+                "recent revisions (10 by default), in "
+                "addition to reading the target "
+                "revision. Read and decode cost scales "
+                "with their combined size; this is not "
+                "a constant-cost counter and is "
+                "unsuitable for frequent polling.",
                 "operationId": "get_memory_capacity",
                 "requestBody": {
                     "content": {
