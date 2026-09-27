@@ -103,6 +103,9 @@ from powercontext.builtin.runtime.decision_model import (
     DecisionModelOption,
     DecisionModelRequest,
     DecisionModelResult,
+    DecisionOutcome,
+    DecisionRequest,
+    DecisionResult,
     StructuredDecisionModel,
 )
 from powercontext.builtin.runtime.errors import InvalidRuntimeRequestError, TopicMemoryProcessingUnavailableError
@@ -224,6 +227,9 @@ __all__ = [
     "DecisionModelOption",
     "DecisionModelRequest",
     "DecisionModelResult",
+    "DecisionOutcome",
+    "DecisionRequest",
+    "DecisionResult",
     "DreamApplication",
     "DreamRun",
     "DreamRunPage",
